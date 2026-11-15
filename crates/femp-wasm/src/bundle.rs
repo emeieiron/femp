@@ -6,7 +6,6 @@
 
 mod dependencies;
 mod rewrite;
-mod tree;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -14,9 +13,9 @@ use std::path::{Path, PathBuf};
 use femp_core::Result;
 use femp_core::ingot::SOURCE_DIR;
 use femp_core::project::{Module, Project};
+use femp_core::source_tree::ModuleTree;
 
 use rewrite::rewrite_path_roots;
-use tree::ModuleTree;
 
 const INGOT_ROOT: &str = "ingot";
 

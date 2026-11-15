@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use femp_core::{Error, Result};
+use crate::error::{Error, Result};
 
 const ROOT_FILE: &str = "lib.fe";
 const SOURCE_EXTENSION: &str = "fe";
@@ -12,6 +12,9 @@ const SOURCE_EXTENSION: &str = "fe";
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ModuleTree {
     pub source: String,
+    /// The file the source was read from; `None` for a module that only has
+    /// a directory.
+    pub file: Option<PathBuf>,
     pub children: BTreeMap<String, ModuleTree>,
 }
 
@@ -44,6 +47,7 @@ impl ModuleTree {
                     self.child(stem)
                 };
                 node.source = source;
+                node.file = Some(path.clone());
             }
         }
         Ok(())
@@ -112,6 +116,11 @@ mod tests {
 
         let tree = ModuleTree::read(dir.path()).unwrap();
         assert!(tree.children["a"].children.contains_key("lib"));
+        assert_eq!(
+            tree.file.as_deref(),
+            Some(dir.path().join("lib.fe").as_path())
+        );
+        assert_eq!(tree.children["a"].file, None);
     }
 
     #[test]

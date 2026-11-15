@@ -9,6 +9,8 @@ pub mod naming;
 pub mod outcome;
 pub mod platform;
 pub mod project;
+pub mod property;
+pub mod source_tree;
 #[cfg(test)]
 mod testing;
 pub mod workspace;
