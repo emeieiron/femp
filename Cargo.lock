@@ -641,6 +641,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "femp-prop"
+version = "0.1.0"
+dependencies = [
+ "femp-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "femp-testing"
 version = "0.1.0"
 dependencies = [

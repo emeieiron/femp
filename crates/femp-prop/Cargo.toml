@@ -1,0 +1,17 @@
+[package]
+name = "femp-prop"
+description = "Property-based and differential testing engine for Fe Multiplatform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
