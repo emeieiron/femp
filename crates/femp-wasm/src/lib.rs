@@ -14,12 +14,12 @@ use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
 use femp_core::{Error, Result};
 use femp_toolchain::module_ops;
+use femp_toolchain::node::MIN_MAJOR as MIN_NODE_MAJOR;
 
 pub use build::{MANIFEST, MODULE};
 
 pub const ID: &str = "wasm";
 const BACKEND: &str = "wasm";
-const MIN_NODE_MAJOR: u32 = 20;
 
 pub struct WasmPlatform {
     id: PlatformId,
@@ -126,7 +126,7 @@ fn require_node(cx: &Context<'_>) -> Result<()> {
         return Err(Error::Unavailable {
             platform: ID.to_string(),
             reason: format!(
-                "running WebAssembly code needs Node.js {MIN_NODE_MAJOR} or newer on PATH"
+                "running WebAssembly code needs Node.js {MIN_NODE_MAJOR} or newer on PATH (the femp installer provides one)"
             ),
         });
     }

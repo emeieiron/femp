@@ -24,6 +24,8 @@ impl Toolchain {
 pub struct Host {
     pub os: String,
     pub arch: String,
+    /// The Node.js that runs WebAssembly code, and its major version.
+    pub node: Option<PathBuf>,
     pub node_major: Option<u32>,
     pub has_c_compiler: bool,
 }

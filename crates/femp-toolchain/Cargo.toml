@@ -4,6 +4,8 @@ description = "Locates, installs, and invokes the Fe compiler for Fe Multiplatfo
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 femp-core.workspace = true

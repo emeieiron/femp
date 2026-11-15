@@ -6,6 +6,7 @@ use std::process::Command;
 use femp_core::Result;
 use femp_core::environment::{Environment, Host, Toolchain};
 
+use crate::node;
 use crate::process::{capture, try_stdout};
 use crate::resolve::{ensure_version, locate};
 
@@ -24,12 +25,12 @@ pub fn environment(pinned_version: &str) -> Result<Environment> {
 }
 
 pub fn host() -> Host {
+    let node = node::found();
     Host {
         os: env::consts::OS.to_string(),
         arch: env::consts::ARCH.to_string(),
-        node_major: try_stdout("node", &["--version"])
-            .as_deref()
-            .and_then(parse_node_major),
+        node: node.map(|node| node.path.clone()),
+        node_major: node.map(|node| node.major),
         has_c_compiler: try_stdout("cc", &["--version"]).is_some(),
     }
 }
@@ -55,16 +56,6 @@ fn parse_backends(help: &str) -> BTreeSet<String> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-fn parse_node_major(version: &str) -> Option<u32> {
-    version
-        .trim()
-        .trim_start_matches('v')
-        .split('.')
-        .next()?
-        .parse()
-        .ok()
 }
 
 #[cfg(test)]
@@ -93,11 +84,5 @@ mod tests {
     #[test]
     fn tolerates_unexpected_help() {
         assert!(parse_backends("no such flag").is_empty());
-    }
-
-    #[test]
-    fn reads_node_major_version() {
-        assert_eq!(parse_node_major("v24.16.0\n"), Some(24));
-        assert_eq!(parse_node_major("garbage"), None);
     }
 }

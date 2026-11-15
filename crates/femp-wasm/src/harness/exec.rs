@@ -17,6 +17,7 @@ pub struct WasmExecutor {
 
 impl WasmExecutor {
     pub fn new(
+        node: &Path,
         runner: &Path,
         module: &Path,
         manifest: &Path,
@@ -29,7 +30,7 @@ impl WasmExecutor {
             .map(|path| path.as_os_str().to_owned())
             .collect();
         Self {
-            session: Session::new("node", args, timeout),
+            session: Session::new(node, args, timeout),
             suite,
         }
     }

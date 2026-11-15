@@ -149,6 +149,7 @@ mod tests {
             host: Host {
                 os: os.to_string(),
                 arch: arch.to_string(),
+                node: None,
                 node_major: None,
                 has_c_compiler,
             },
