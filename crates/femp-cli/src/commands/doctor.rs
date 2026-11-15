@@ -45,8 +45,10 @@ fn print_environment(environment: &Environment) {
     console::line(format!("  system     {} {}", host.arch, host.os));
     console::line(format!(
         "  node       {}",
-        host.node_major
-            .map_or("not found".to_string(), |major| format!("v{major}"))
+        match (&host.node, host.node_major) {
+            (Some(path), Some(major)) => format!("v{major} ({})", path.display()),
+            _ => "not found".to_string(),
+        }
     ));
     console::line(format!(
         "  cc         {}",

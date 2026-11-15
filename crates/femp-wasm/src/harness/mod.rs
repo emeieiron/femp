@@ -65,7 +65,14 @@ pub fn start(
         &entries,
         serde_json::to_string_pretty(&render::entries(suite)).unwrap_or_default(),
     )?;
+    let node = cx
+        .environment
+        .host
+        .node
+        .clone()
+        .unwrap_or_else(|| "node".into());
     Ok(Box::new(WasmExecutor::new(
+        &node,
         &runner,
         &wasm,
         &manifest,

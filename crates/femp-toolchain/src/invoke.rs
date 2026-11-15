@@ -4,6 +4,7 @@ use std::process::Command;
 use femp_core::environment::{OptLevel, Toolchain};
 use femp_core::{Error, Result};
 
+use crate::node;
 use crate::process::{Captured, capture, describe};
 
 pub struct BuildRequest<'a> {
@@ -72,6 +73,9 @@ pub fn test(toolchain: &Toolchain, request: &TestRequest<'_>) -> Result<Captured
 fn fe(toolchain: &Toolchain, subcommand: &str) -> Command {
     let mut command = Command::new(&toolchain.fe);
     command.args(["--color", "never", subcommand]);
+    if let Some(path) = node::search_path() {
+        command.env("PATH", path);
+    }
     command
 }
 
