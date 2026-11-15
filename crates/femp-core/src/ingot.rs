@@ -21,6 +21,7 @@ pub struct IngotManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IngotDependency {
     pub alias: String,
+    pub name: Option<String>,
     pub source: DependencySource,
 }
 
@@ -28,7 +29,14 @@ pub struct IngotDependency {
 pub enum DependencySource {
     Path(PathBuf),
     Name(String),
-    Remote,
+    Remote(GitDependency),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitDependency {
+    pub source: String,
+    pub rev: String,
+    pub path: Option<PathBuf>,
 }
 
 impl IngotManifest {
@@ -62,7 +70,7 @@ fn string_field(table: &Table, key: &str) -> Option<String> {
     table.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-fn parse_dependencies(document: &Table) -> Vec<IngotDependency> {
+pub fn parse_dependencies(document: &Table) -> Vec<IngotDependency> {
     let Some(dependencies) = document.get("dependencies").and_then(Value::as_table) else {
         return Vec::new();
     };
@@ -71,6 +79,9 @@ fn parse_dependencies(document: &Table) -> Vec<IngotDependency> {
         .filter_map(|(alias, value)| {
             dependency_source(alias, value).map(|source| IngotDependency {
                 alias: alias.clone(),
+                name: value
+                    .as_table()
+                    .and_then(|table| string_field(table, "name")),
                 source,
             })
         })
@@ -83,11 +94,18 @@ fn parse_dependencies(document: &Table) -> Vec<IngotDependency> {
 // when it has `path`, and a named ingot in every other case.
 fn dependency_source(alias: &str, value: &Value) -> Option<DependencySource> {
     match value {
+        Value::Boolean(true) => Some(DependencySource::Name(alias.to_string())),
         Value::String(text) if looks_like_version(text) => {
             Some(DependencySource::Name(alias.to_string()))
         }
         Value::String(text) => Some(DependencySource::Path(PathBuf::from(text))),
-        Value::Table(table) if table.contains_key("source") => Some(DependencySource::Remote),
+        Value::Table(table) if table.contains_key("source") => {
+            Some(DependencySource::Remote(GitDependency {
+                source: string_field(table, "source")?,
+                rev: string_field(table, "rev")?,
+                path: string_field(table, "path").map(PathBuf::from),
+            }))
+        }
         Value::Table(table) => Some(match string_field(table, "path") {
             Some(path) => DependencySource::Path(PathBuf::from(path)),
             None => DependencySource::Name(
@@ -165,7 +183,14 @@ mod tests {
             source("renamed"),
             DependencySource::Name("real_name".into())
         );
-        assert_eq!(source("fetched"), DependencySource::Remote);
+        assert_eq!(
+            source("fetched"),
+            DependencySource::Remote(GitDependency {
+                source: "https://example.com/repo.git".into(),
+                rev: "abc".into(),
+                path: None,
+            })
+        );
     }
 
     #[test]

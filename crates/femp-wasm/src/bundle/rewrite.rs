@@ -32,6 +32,13 @@ pub fn rewrite_path_roots(source: &str, replace: &dyn Fn(&str) -> Option<String>
             }
             previous = bytes[end - 1];
             end
+        } else if bytes[index..].starts_with(b"::") {
+            previous = b':';
+            index + 2
+        } else if byte == b':' {
+            // A single colon introduces a type or value, rather than a path segment.
+            previous = b'=';
+            index + 1
         } else if byte.is_ascii_digit() {
             // Numeric literals such as `0x1f` or `10u8` are not identifiers.
             previous = byte;
@@ -107,6 +114,14 @@ mod tests {
             "use ingot::core_lib::error::Failure\nuse ingot::dep_lib::{A, B}\n"
         );
         assert_eq!(rewrite("let x = dep::f(1)"), "let x = ingot::dep_lib::f(1)");
+    }
+
+    #[test]
+    fn rewrites_roots_after_type_and_field_separators() {
+        assert_eq!(
+            rewrite("fn f(x: dep::Thing) { Point { x: dep::get() } }"),
+            "fn f(x: ingot::dep_lib::Thing) { Point { x: ingot::dep_lib::get() } }"
+        );
     }
 
     #[test]

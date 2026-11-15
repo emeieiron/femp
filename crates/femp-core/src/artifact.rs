@@ -61,10 +61,14 @@ pub fn of_kind(artifacts: &[Artifact], kind: ArtifactKind) -> impl Iterator<Item
 
 pub fn sha256_hex(path: &Path) -> Result<String> {
     let bytes = fs::read(path).map_err(|source| Error::io("read", path, source))?;
-    Ok(Sha256::digest(bytes)
+    Ok(sha256(&bytes))
+}
+
+pub fn sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
-        .collect())
+        .collect()
 }
 
 pub fn write_file(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {

@@ -8,6 +8,7 @@ use femp_core::project::Project;
 use femp_toolchain::probe;
 
 use crate::console;
+use crate::generation::{self, StagedProject};
 use crate::registry;
 
 const ALL_TARGETS: &str = "all";
@@ -16,6 +17,24 @@ pub struct Session {
     pub project: Project,
     pub registry: PlatformRegistry,
     pub environment: Environment,
+}
+
+pub struct BuildInputs<'a> {
+    session: &'a Session,
+    staged: Option<StagedProject>,
+}
+
+impl BuildInputs<'_> {
+    pub fn context(&self, optimize: OptLevel) -> Context<'_> {
+        Context {
+            project: self
+                .staged
+                .as_ref()
+                .map_or(&self.session.project, |staged| &staged.project),
+            environment: &self.session.environment,
+            optimize,
+        }
+    }
 }
 
 impl Session {
@@ -32,12 +51,16 @@ impl Session {
         })
     }
 
-    pub fn context(&self, optimize: OptLevel) -> Context<'_> {
-        Context {
-            project: &self.project,
-            environment: &self.environment,
-            optimize,
-        }
+    pub fn prepare(
+        &self,
+        platforms: &[&dyn Platform],
+        include_shared: bool,
+    ) -> Result<BuildInputs<'_>> {
+        let staged = generation::stage(&self.project, platforms, include_shared)?;
+        Ok(BuildInputs {
+            session: self,
+            staged,
+        })
     }
 
     /// Resolves `--target` values to platforms. Naming a platform demands

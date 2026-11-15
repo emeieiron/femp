@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use femp_core::Result;
 use femp_core::artifact::{Artifact, ArtifactKind, reset_dir, write_file};
 use femp_core::platform::Context;
 use femp_core::project::Module;
+use femp_core::{Error, Result};
 use femp_toolchain::invoke::{self, BuildRequest};
 
 use crate::bundle::bundle;
@@ -45,4 +45,12 @@ pub fn build(
         Artifact::existing(MODULE, out_dir.join(format!("{name}.wasm")))?,
         Artifact::existing(MANIFEST, out_dir.join(format!("{name}.manifest.json")))?,
     ])
+}
+
+pub fn check_bundle(cx: &Context<'_>, backend: &str, module: &Module) -> Result<()> {
+    let scratch = tempfile::tempdir()
+        .map_err(|error| Error::io("stage WASM source in", &std::env::temp_dir(), error))?;
+    let staged = scratch.path().join(format!("{}.fe", module.ingot.name));
+    write_file(&staged, bundle(cx.project, module)?)?;
+    invoke::check_standalone(&cx.environment.toolchain, backend, &staged)
 }

@@ -20,6 +20,8 @@ pub enum Command {
     Doctor,
     /// Manage the Fe compiler used by femp
     Toolchain(ToolchainArgs),
+    /// Materialize project-generated sources for editing and code navigation
+    Generate,
     /// Type-check every module for the platforms it must support
     Check(TargetArgs),
     /// Compile platform modules and generate their bindings

@@ -23,9 +23,21 @@ pub struct TestRequest<'a> {
 }
 
 pub fn check(toolchain: &Toolchain, backend: &str, input: &Path) -> Result<()> {
+    check_input(toolchain, backend, input, false)
+}
+
+pub fn check_standalone(toolchain: &Toolchain, backend: &str, input: &Path) -> Result<()> {
+    check_input(toolchain, backend, input, true)
+}
+
+fn check_input(toolchain: &Toolchain, backend: &str, input: &Path, standalone: bool) -> Result<()> {
     let mut command = fe(toolchain, "check");
-    command.args(["--backend", backend]).arg(input);
-    require_success(&mut command).map(|_| ())
+    command.args(["--backend", backend]);
+    if standalone {
+        command.arg("--standalone");
+    }
+    command.arg(input);
+    report_success(&mut command)
 }
 
 pub fn build(toolchain: &Toolchain, request: &BuildRequest<'_>) -> Result<()> {
@@ -42,7 +54,7 @@ pub fn build(toolchain: &Toolchain, request: &BuildRequest<'_>) -> Result<()> {
         command.arg("--standalone");
     }
     command.arg(request.input);
-    require_success(&mut command).map(|_| ())
+    report_success(&mut command)
 }
 
 pub fn test(toolchain: &Toolchain, request: &TestRequest<'_>) -> Result<Captured> {
@@ -73,4 +85,12 @@ fn require_success(command: &mut Command) -> Result<Captured> {
             output: captured.combined(),
         })
     }
+}
+
+fn report_success(command: &mut Command) -> Result<()> {
+    let captured = require_success(command)?;
+    if !captured.stderr.trim().is_empty() {
+        eprint!("{}", captured.stderr);
+    }
+    Ok(())
 }

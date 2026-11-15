@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
+use crate::ingot::SOURCE_DIR;
 use crate::naming::is_valid_name;
 
 pub const MANIFEST_FILE: &str = "femp.toml";
@@ -53,6 +54,17 @@ fn default_fe_version() -> String {
 pub struct ModuleSection {
     pub path: PathBuf,
     pub platform: Option<String>,
+    #[serde(default)]
+    pub generate: BTreeMap<String, GeneratorSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratorSection {
+    /// The executable followed by its arguments. Standard output is Fe source.
+    pub command: Vec<String>,
+    /// Destination relative to the module root in the staged ingot.
+    pub output: PathBuf,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -90,6 +102,41 @@ impl Manifest {
                 path,
                 format!("module name `{name}` is not a valid name"),
             ));
+        }
+        for (module, section) in &self.modules {
+            let mut outputs = BTreeSet::new();
+            for (name, generator) in &section.generate {
+                let invalid = |message: &str| {
+                    Error::invalid_manifest(
+                        path,
+                        format!("modules.{module}.generate.{name}: {message}"),
+                    )
+                };
+                if !is_valid_name(name) {
+                    return Err(invalid("invalid generator name"));
+                }
+                if generator
+                    .command
+                    .first()
+                    .is_none_or(|program| program.trim().is_empty())
+                {
+                    return Err(invalid("command must name an executable"));
+                }
+                let output = &generator.output;
+                if !output.starts_with(SOURCE_DIR)
+                    || output.extension().is_none_or(|ext| ext != "fe")
+                    || output
+                        .components()
+                        .any(|component| !matches!(component, Component::Normal(_)))
+                {
+                    return Err(invalid("output must name a .fe file inside src"));
+                }
+                if !outputs.insert(output) {
+                    return Err(invalid(
+                        "output is already declared by another generator in this module",
+                    ));
+                }
+            }
         }
         Ok(())
     }

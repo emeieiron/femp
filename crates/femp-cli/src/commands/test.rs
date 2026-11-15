@@ -12,14 +12,15 @@ use crate::session::Session;
 pub fn run(args: &TestArgs) -> Result<bool> {
     let session = Session::open()?;
     let platforms = session.select(&args.target.targets)?;
-    let cx = session.context(OptLevel::default());
+    let inputs = session.prepare(&platforms, true)?;
+    let cx = inputs.context(OptLevel::default());
 
-    let jobs = plan::plan(&session.project, &platforms);
+    let jobs = plan::plan(cx.project, &platforms);
     let runs = run::run(&cx, &jobs, args.filter.as_deref(), &mut |finished| {
         console::step("Tested", &summary_line(finished));
     });
 
-    print_parity(&session.project, &runs);
+    print_parity(cx.project, &runs);
     print_logs(&runs, args.verbose);
     Ok(runs.iter().all(TestRun::succeeded))
 }

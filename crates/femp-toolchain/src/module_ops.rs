@@ -17,7 +17,7 @@ pub fn test(
     module: &Module,
     filter: Option<&str>,
 ) -> Result<TestRun> {
-    let captured = invoke::test(
+    let mut captured = invoke::test(
         &cx.environment.toolchain,
         &TestRequest {
             backend,
@@ -26,5 +26,7 @@ pub fn test(
             optimize: cx.optimize,
         },
     )?;
+    captured.stderr = module.diagnostics(&captured.stderr);
+    captured.stdout = module.diagnostics(&captured.stdout);
     Ok(test_output::into_run(&module.name, platform, &captured))
 }

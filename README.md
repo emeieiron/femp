@@ -45,6 +45,7 @@ include the WebAssembly backend. The compiler is kept under `~/.femp/toolchains/
 | --- | --- |
 | `femp new <name>` | Creates a project with a shared module and one module per platform. |
 | `femp doctor` | Shows the compiler, its backends, host tools, and which platforms are available. |
+| `femp generate` | Materializes generated sources for editing and code navigation. |
 | `femp toolchain install` | Builds the pinned Fe compiler with the backends FeMP drives. |
 | `femp check [-t <platform>]` | Type-checks platform modules, and every shared module once per platform. |
 | `femp build [-t <platform>] [-O <level>]` | Compiles platform modules into `build/` and generates bindings. |
@@ -69,6 +70,10 @@ my-app/
 See [docs/project-layout.md](docs/project-layout.md) for the manifest and the rules that keep
 shared code portable, and [examples/vesting](examples/vesting) for a complete project: a token
 vesting library used by a contract, a CLI and a browser page.
+
+Modules can declare source generators that run before checking, building, testing, and
+packaging. FeMP includes the generated sources in the staged ingots for every target.
+[Configure module generators](docs/project-layout.md#generated-source)
 
 ## Testing across platforms
 

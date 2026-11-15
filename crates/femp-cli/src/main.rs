@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod console;
+mod generation;
 mod pipeline;
 mod registry;
 mod session;
@@ -21,6 +22,10 @@ fn main() -> ExitCode {
         Command::Test(args) => commands::test::run(&args),
         Command::Package(args) => commands::package::run(&args),
         Command::Clean => commands::clean::run(),
+        Command::Generate => std::env::current_dir()
+            .map_err(anyhow::Error::from)
+            .and_then(|dir| Ok(femp_core::project::Project::discover(&dir)?))
+            .and_then(|project| generation::editor_sources(&project).map(|()| true)),
     };
     match outcome {
         Ok(true) => ExitCode::SUCCESS,

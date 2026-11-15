@@ -21,7 +21,9 @@ pub fn build_all<'a>(
         for module in cx.project.modules_for(platform.id()) {
             console::step("Building", &format!("{} [{}]", module.name, platform.id()));
             let out_dir = cx.project.build_dir(platform.id(), module);
-            let mut artifacts = platform.build(cx, module, &out_dir)?;
+            let mut artifacts = platform
+                .build(cx, module, &out_dir)
+                .map_err(|error| module.compiler_error(error))?;
             let bindings = platform.bindings(cx, module, &artifacts, &kinds, &out_dir)?;
             artifacts.extend(bindings);
             built.push(BuiltModule {
