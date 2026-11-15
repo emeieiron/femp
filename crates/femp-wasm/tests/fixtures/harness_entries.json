@@ -1,0 +1,24 @@
+[
+  {
+    "kind": "property",
+    "export": "femp_entry_0",
+    "params": 2
+  },
+  {
+    "kind": "property",
+    "export": "femp_entry_1",
+    "params": 1
+  },
+  {
+    "kind": "unsupported"
+  },
+  {
+    "kind": "machine",
+    "export": "femp_entry_3",
+    "init": 1,
+    "commands": [
+      1,
+      1
+    ]
+  }
+]

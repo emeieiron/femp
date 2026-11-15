@@ -1,6 +1,7 @@
 mod bindings;
 mod build;
 mod bundle;
+mod harness;
 mod manifest;
 
 use std::path::Path;
@@ -10,6 +11,7 @@ use femp_core::environment::Environment;
 use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
+use femp_core::property::{Executor, HarnessRequest};
 use femp_core::{Error, Result};
 use femp_toolchain::module_ops;
 
@@ -79,15 +81,7 @@ impl Platform for WasmPlatform {
     }
 
     fn test(&self, cx: &Context<'_>, module: &Module, filter: Option<&str>) -> Result<TestRun> {
-        let node = cx.environment.host.node_major;
-        if node.is_none_or(|major| major < MIN_NODE_MAJOR) {
-            return Err(Error::Unavailable {
-                platform: ID.to_string(),
-                reason: format!(
-                    "running WebAssembly tests needs Node.js {MIN_NODE_MAJOR} or newer on PATH"
-                ),
-            });
-        }
+        require_node(cx)?;
         module_ops::test(cx, BACKEND, &self.id, module, filter)
     }
 
@@ -115,4 +109,26 @@ impl Platform for WasmPlatform {
     ) -> Result<Vec<Artifact>> {
         copy_flat(built, &dist_dir.join(&module.name))
     }
+
+    fn property_harness(
+        &self,
+        cx: &Context<'_>,
+        request: &HarnessRequest<'_>,
+    ) -> Result<Box<dyn Executor>> {
+        require_node(cx)?;
+        harness::start(cx, &self.id, BACKEND, request)
+    }
+}
+
+fn require_node(cx: &Context<'_>) -> Result<()> {
+    let node = cx.environment.host.node_major;
+    if node.is_none_or(|major| major < MIN_NODE_MAJOR) {
+        return Err(Error::Unavailable {
+            platform: ID.to_string(),
+            reason: format!(
+                "running WebAssembly code needs Node.js {MIN_NODE_MAJOR} or newer on PATH"
+            ),
+        });
+    }
+    Ok(())
 }

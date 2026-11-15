@@ -127,6 +127,11 @@ class Host {
     return this.handles.size;
   }
 
+  // Adds or replaces a file the module may open from now on.
+  setFile(name, contents) {
+    this.files.set(name, toBytes(contents));
+  }
+
   imports() {
     return {
       [IMPORT_MODULE]: {
