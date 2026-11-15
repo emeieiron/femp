@@ -1,0 +1,76 @@
+use core::marker::Copy
+use ingot::position::Position
+use ingot::schedule::Schedule
+
+/// A vesting position as a state machine: time passes and the beneficiary
+/// claims. Failed claims leave the position unchanged and record their code.
+#[machine(steps = "1..=24", runs = 100)]
+pub struct VestingModel { pub position: Position, pub now: u64, pub last_error: u32 }
+
+impl Copy for VestingModel {}
+
+impl VestingModel {
+    #[init]
+    #[gen(
+        total = "1..=1_000_000",
+        start = "0..=1_000",
+        cliff = "0..=1_000",
+        duration = "1..=2_000",
+    )]
+    pub fn open(total: u64, start: u64, cliff: u64, duration: u64) -> VestingModel {
+        // A cliff longer than the schedule is clamped so every run starts valid.
+        let cliff = if cliff > duration { duration } else { cliff }
+        match Schedule::new(total, start, cliff, duration) {
+            Result::Ok(schedule) => {
+                VestingModel { position: Position::open(schedule), now: 0, last_error: 0 }
+            },
+            Result::Err(_) => core::panic(),
+        }
+    }
+
+    #[command]
+    #[gen(seconds = "0..=500")]
+    pub fn wait(self, seconds: u64) -> VestingModel {
+        VestingModel {
+            position: self.position,
+            now: self.now + seconds,
+            last_error: self.last_error,
+        }
+    }
+
+    #[command(weight = 2)]
+    #[gen(amount = "0..=1_000_000")]
+    pub fn claim(self, amount: u64) -> VestingModel {
+        match self.position.claim(amount, now: self.now) {
+            Result::Ok(updated) => VestingModel { position: updated, now: self.now, last_error: 0 },
+            Result::Err(error) => {
+                VestingModel { position: self.position, now: self.now, last_error: error.code() }
+            },
+        }
+    }
+
+    #[invariant]
+    pub fn claims_never_exceed_the_total(self) -> bool {
+        self.position.claimed <= self.position.schedule.total
+    }
+
+    #[invariant]
+    pub fn claims_never_exceed_what_vested(self) -> bool {
+        self.position.claimed <= self.position.schedule.vested_at(self.now)
+    }
+
+    #[observe]
+    pub fn claimed(self) -> u64 {
+        self.position.claimed
+    }
+
+    #[observe]
+    pub fn claimable(self) -> u64 {
+        self.position.claimable_at(self.now)
+    }
+
+    #[observe]
+    pub fn last_error(self) -> u32 {
+        self.last_error
+    }
+}
