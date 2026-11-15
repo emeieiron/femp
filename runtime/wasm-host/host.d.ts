@@ -69,6 +69,8 @@ export interface HostOptions {
 export interface HostState {
   /** Files the module opened and has not closed. */
   readonly openHandles: number;
+  /** Adds or replaces a file the module may open from now on. */
+  setFile(name: string, contents: string | Uint8Array): void;
 }
 
 export declare class Guest {

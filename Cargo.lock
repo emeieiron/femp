@@ -679,6 +679,7 @@ name = "femp-wasm"
 version = "0.1.0"
 dependencies = [
  "femp-core",
+ "femp-harness",
  "femp-toolchain",
  "serde",
  "serde_json",

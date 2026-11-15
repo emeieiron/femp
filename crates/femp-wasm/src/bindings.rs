@@ -10,11 +10,13 @@ use femp_core::{Error, Result};
 use crate::build::MANIFEST;
 use crate::manifest::WasmManifest;
 
+pub use render::HOST_SCRIPT_FILE;
+
 pub const TYPESCRIPT: &str = "typescript";
 pub const RUNTIME: ArtifactKind = ArtifactKind("runtime");
 pub const PACKAGE_MANIFEST: ArtifactKind = ArtifactKind("package-manifest");
 
-const HOST_SCRIPT: &str = include_str!("../../../runtime/wasm-host/host.js");
+pub const HOST_SCRIPT: &str = include_str!("../../../runtime/wasm-host/host.js");
 const HOST_TYPES: &str = include_str!("../../../runtime/wasm-host/host.d.ts");
 
 pub fn generate(

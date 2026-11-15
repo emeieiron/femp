@@ -75,6 +75,15 @@ test("files are read-only and tracked by handle", async () => {
   assert.equal(guest.host.openHandles, 1);
 });
 
+test("files can be added after instantiation", async () => {
+  const guest = await load();
+  assert.deepEqual(guest.call("file_size", "later.txt"), { ok: false, code: 1 });
+  guest.host.setFile("later.txt", new Uint8Array([1, 2, 3]));
+  assert.deepEqual(guest.call("file_size", "later.txt"), { ok: true, value: 3 });
+  guest.host.setFile("later.txt", "four");
+  assert.deepEqual(guest.call("file_size", "later.txt"), { ok: true, value: 4 });
+});
+
 test("arguments are checked against the manifest", async () => {
   const guest = await load();
   assert.throws(() => guest.call("add", 1n), ContractError);
