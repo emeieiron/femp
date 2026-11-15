@@ -1,0 +1,7 @@
+[ingot]
+name = "planted_wasm"
+version = "0.1.0"
+target = "wasm"
+
+[dependencies]
+planted_core = "../shared"

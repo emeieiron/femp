@@ -1,0 +1,75 @@
+use core::marker::Copy
+
+pub fn doubled(x: u64) -> u64 {
+    x * 2
+}
+
+// One platform rounds differently from 1000 on.
+#[cfg(target = "wasm")]
+fn adjusted(_ x: u64) -> u64 {
+    if x >= 1000 { x - 1 } else { x }
+}
+
+#[cfg(target = "evm")]
+fn adjusted(_ x: u64) -> u64 {
+    x
+}
+
+#[cfg(target = "native")]
+fn adjusted(_ x: u64) -> u64 {
+    x
+}
+
+#[differential]
+pub fn rounding(x: u64) -> u64 {
+    adjusted(x)
+}
+
+/// False from 250 on.
+#[property]
+pub fn halves_stay_small(x: u64) -> bool {
+    x / 2 < 125
+}
+
+/// Overflows for the most negative value.
+#[property]
+pub fn negation_round_trips(x: i64) -> bool {
+    0 - (0 - x) == x
+}
+
+/// Breaks once three steps each add at least 10.
+#[machine(steps = "1..=20", runs = 200)]
+pub struct Counter { pub big: u64 }
+
+impl Copy for Counter {}
+
+impl Counter {
+    #[init]
+    pub fn new() -> Counter {
+        Counter { big: 0 }
+    }
+
+    #[command]
+    pub fn add(self, amount: u8) -> Counter {
+        if amount >= 10 {
+            Counter { big: self.big + 1 }
+        } else {
+            self
+        }
+    }
+
+    #[command]
+    pub fn idle(self) -> Counter {
+        self
+    }
+
+    #[invariant]
+    pub fn few_big_adds(self) -> bool {
+        self.big < 3
+    }
+
+    #[observe]
+    pub fn big(self) -> u64 {
+        self.big
+    }
+}
