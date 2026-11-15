@@ -13,6 +13,10 @@ thiserror.workspace = true
 toml.workspace = true
 glob = "0.3"
 
+[features]
+# Sample data for the tests of crates that build on this one.
+fixtures = []
+
 [dev-dependencies]
 tempfile.workspace = true
 

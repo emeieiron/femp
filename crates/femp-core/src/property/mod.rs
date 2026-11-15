@@ -3,6 +3,8 @@
 //! points of a suite, and the executor interface each platform implements.
 
 pub mod executor;
+#[cfg(any(test, feature = "fixtures"))]
+pub mod fixtures;
 pub mod harness_ingot;
 pub mod outcome;
 pub mod suite;
