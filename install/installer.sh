@@ -313,9 +313,14 @@ modify_path() {
             add_to_profile "$file"
         fi
     done
-    if [ -f "$HOME/.zshrc" ] || [ "${SHELL##*/}" = zsh ]; then
-        add_to_profile "$HOME/.zshrc"
-    fi
+    case "${SHELL:-}" in
+        */zsh) add_to_profile "$HOME/.zshrc" ;;
+        *)
+            if [ -f "$HOME/.zshrc" ]; then
+                add_to_profile "$HOME/.zshrc"
+            fi
+            ;;
+    esac
     if has fish || [ -d "$HOME/.config/fish" ]; then
         mkdir -p "$HOME/.config/fish/conf.d"
         {
