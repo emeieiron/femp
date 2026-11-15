@@ -1,0 +1,7 @@
+[ingot]
+name = "planted_evm"
+version = "0.1.0"
+target = "evm"
+
+[dependencies]
+planted_core = "../shared"

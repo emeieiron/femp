@@ -1,0 +1,19 @@
+# A project whose properties fail on purpose, for the property-testing tests.
+[project]
+name = "planted"
+version = "0.1.0"
+
+[modules.core]
+path = "shared"
+
+[modules.contracts]
+path = "evm"
+platform = "evm"
+
+[modules.cli]
+path = "native"
+platform = "native"
+
+[modules.web]
+path = "wasm"
+platform = "wasm"

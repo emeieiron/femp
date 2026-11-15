@@ -1,0 +1,12 @@
+msg PlantedMsg {
+    #[selector = sol("answer()")]
+    Answer -> u64,
+}
+
+pub contract Planted {
+    recv PlantedMsg {
+        Answer -> u64 {
+            planted_core::doubled(x: 21)
+        }
+    }
+}

@@ -1,0 +1,7 @@
+[ingot]
+name = "planted_native"
+version = "0.1.0"
+target = "native"
+
+[dependencies]
+planted_core = "../shared"
