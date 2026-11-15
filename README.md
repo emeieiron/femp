@@ -16,7 +16,7 @@ and every build step is a call to `fe`.
 
 ## Requirements
 
-- Rust 1.85 or newer to build `femp`; Rust 1.97 or newer to build the Fe compiler.
+- Rust 1.88 or newer to build `femp`; Rust 1.97 or newer to build the Fe compiler.
 - Node.js 20 or newer (the compiler's parser generator, WebAssembly tests, and the bindings).
 - A C compiler (`cc`) to link native executables.
 - Fe **26.6.0**, installed by `femp toolchain install`.
@@ -32,6 +32,7 @@ femp toolchain install                 # builds Fe 26.6.0 with all three backend
 femp new my-app && cd my-app
 femp doctor
 femp test
+femp prop
 femp build
 ```
 
@@ -50,6 +51,7 @@ include the WebAssembly backend. The compiler is kept under `~/.femp/toolchains/
 | `femp check [-t <platform>]` | Type-checks platform modules, and every shared module once per platform. |
 | `femp build [-t <platform>] [-O <level>]` | Compiles platform modules into `build/` and generates bindings. |
 | `femp test [-t <platform>] [-f <pattern>]` | Runs shared tests on every platform and compares the outcomes. |
+| `femp prop [-t <platform>] [-f <pattern>] [--seed <n>]` | Runs properties, differentials and state machines with generated inputs on every platform, and minimizes failures. |
 | `femp package` | Builds, then collects distributable packages and a hash index under `dist/`. |
 | `femp clean` | Removes `build/` and `dist/`. |
 
@@ -88,6 +90,44 @@ core::invalid_claims_are_rejected         pass    pass    pass
 A test that passes on one platform and fails on another is reported as a divergence, and the
 command exits with a failure.
 
+## Property testing
+
+Fe Property Testing checks properties with generated inputs. You mark Fe functions and structs
+in the shared code, and `femp prop` runs them on the EVM (in an embedded EVM), as a native
+executable and as WebAssembly, then compares the results:
+
+```fe
+#[property]
+#[gen(cliff = "0..=10_000", duration = "1..=10_000")]
+pub fn vested_never_exceeds_total(total: u64, start: u64, cliff: u64, duration: u64, now: u64) -> bool {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => schedule.vested_at(now) <= total,
+        Result::Err(_) => true,
+    }
+}
+```
+
+- **`#[property]`** must hold on every platform.
+- **`#[differential]`** must give the same value, error or panic on every platform.
+- **`#[machine]`** generates sequences of commands and checks invariants after each step.
+  Declared in an `evm` module, a machine can deploy and drive the project's contracts.
+
+Each failure is shrunk to a minimal counterexample. It is reported with each platform's outcome
+and the seed that reproduces it, and saved under `regressions/`, which later runs replay first:
+
+```
+FAIL  core::rounding  diverges across targets after 2 cases
+      x = 1000
+      evm     returned 1000
+      native  returned 1000
+      wasm    returned 999
+      seed 0x0000000000000007, case 1, minimized in 78 runs
+      saved to regressions/core/rounding.json
+```
+
+See [docs/property-testing.md](docs/property-testing.md) for generators, machines, comparison
+modes and options.
+
 ## Repository
 
 | Path | Contents |
@@ -96,17 +136,19 @@ command exits with a failure.
 | `crates/femp-toolchain` | Locating, installing and invoking the Fe compiler. |
 | `crates/femp-evm`, `femp-native`, `femp-wasm` | One adapter per platform. |
 | `crates/femp-testing` | Cross-platform test runs and the parity matrix. |
+| `crates/femp-prop` | Property testing: discovery, generators, the engine, shrinking, regressions, reports. |
+| `crates/femp-harness` | Line-protocol sessions with harnesses that run as processes. |
 | `crates/femp-cli` | The `femp` binary and the templates for `femp new`. |
-| `runtime/wasm-host` | The JavaScript host runtime shipped with WebAssembly bindings. |
+| `runtime/wasm-host` | The JavaScript host runtime shipped with WebAssembly bindings, and the property-harness runner. |
 | `examples/vesting` | The demonstrator project. |
-| `docs/` | [Architecture](docs/architecture.md), [project layout](docs/project-layout.md), [adding a platform](docs/adding-a-platform.md). |
+| `docs/` | [Architecture](docs/architecture.md), [project layout](docs/project-layout.md), [property testing](docs/property-testing.md), [adding a platform](docs/adding-a-platform.md). |
 
 ## Development
 
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-node --test runtime/wasm-host
+node --test runtime/wasm-host/*.test.js
 ```
 
 Tests that need the Fe compiler skip themselves when it is not installed.
