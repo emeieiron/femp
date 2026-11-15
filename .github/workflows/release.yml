@@ -1,0 +1,90 @@
+# Builds femp and the Fe compiler for every supported host and publishes them,
+# with the installer, as a GitHub release. Runs when a `v*` tag is pushed.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # Building Fe needs Rust 1.97 or newer.
+  RUST_TOOLCHAIN: "1.98.0"
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  archive:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            smoke: true
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+            smoke: true
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            smoke: true
+          # Cross-compiled on Apple silicon.
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            smoke: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "${{ matrix.target }}"
+          rustup default "$RUST_TOOLCHAIN"
+      - name: Build the archive
+        run: install/build-archive.sh "${{ matrix.target }}" out
+      - name: Install it with the installer
+        if: matrix.smoke
+        run: |
+          (cd out && shasum -a 256 *.tar.gz > SHA256SUMS)
+          FEMP_DOWNLOAD_URL="file://$PWD/out" HOME="$RUNNER_TEMP/home" \
+            sh install/installer.sh --skip-deps --no-modify-path
+          "$RUNNER_TEMP/home/.femp/bin/femp" --version
+          rm out/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: femp-${{ matrix.target }}
+          path: out/femp-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Add the installer and checksums
+        run: |
+          cp install/installer.sh out/
+          (cd out && sha256sum *.tar.gz installer.sh > SHA256SUMS)
+          cat out/SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" out/* --title "femp $TAG" --generate-notes --verify-tag
