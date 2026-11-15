@@ -114,8 +114,8 @@ async function runMachine(entry) {
 for (;;) {
   const id = Number(await next());
   const entry = entries[id];
-  if (!entry) {
-    write(`!error no entry point ${id}`);
+  if (!entry || entry.kind === "unsupported") {
+    write(`!error entry point ${id} has no export in this module`);
     continue;
   }
   if (entry.kind === "machine") {
