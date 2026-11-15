@@ -6,6 +6,7 @@
 pub mod cases;
 pub mod choices;
 pub mod compare;
+pub mod discover;
 pub mod generators;
 pub mod rng;
 pub mod shrink;

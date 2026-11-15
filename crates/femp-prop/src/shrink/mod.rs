@@ -194,7 +194,7 @@ mod tests {
     fn removes_irrelevant_steps_from_sequences() {
         let amount = Param {
             name: "amount".to_string(),
-            labelled: true,
+            label: Some("amount".to_string()),
             ty: Ty::Uint(8),
             generator: "any".to_string(),
         };

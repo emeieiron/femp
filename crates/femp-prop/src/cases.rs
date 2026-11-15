@@ -196,7 +196,7 @@ mod tests {
     fn param(name: &str, ty: Ty, generator: &str) -> Param {
         Param {
             name: name.to_string(),
-            labelled: true,
+            label: Some(name.to_string()),
             ty,
             generator: generator.to_string(),
         }
