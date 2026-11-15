@@ -143,8 +143,9 @@ that is new enough.
 - Unit tests cover parsing, layering, the bundler, the test-output parser and the parity matrix.
 - Generators are tested against files written by the real compiler
   (`crates/*/tests/fixtures`). Set `FEMP_UPDATE_FIXTURES=1` to rewrite the expected output.
-- `runtime/wasm-host` has its own suite (`node --test`) against a module built from
-  `test/probe.fe`.
+- `runtime/wasm-host` has its own suite (`node --test runtime/wasm-host/*.test.js`): the host
+  runtime against a module built from `test/probe.fe`, and the property runner against one built
+  from `test/harness_probe.fe`.
 - `crates/femp-cli/tests` drives the `femp` binary against the demonstrator when the compiler is
   installed.
 - `examples/vesting/e2e` runs one table of cases against the three built artifacts.
