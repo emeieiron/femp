@@ -14,21 +14,50 @@ FeMP sits on top of the Fe compiler. It does not change the language: shared cod
 Fe ingots, platform differences are expressed with traits, effects and `#[cfg(target = ...)]`,
 and every build step is a call to `fe`.
 
-## Requirements
+## Installing
 
-- Rust 1.88 or newer to build `femp`; Rust 1.97 or newer to build the Fe compiler.
-- Node.js 20 or newer (the compiler's parser generator, WebAssembly tests, and the bindings).
-- A C compiler (`cc`) to link native executables.
-- Fe **26.6.0**, installed by `femp toolchain install`.
+```sh
+curl -fsSL https://github.com/emeieiron/femp/releases/latest/download/installer.sh | sh
+```
+
+The installer works on Linux (x86-64 and ARM, glibc) and macOS (Apple silicon and Intel). It
+installs into `~/.femp` (or `FEMP_HOME`) and adds `~/.femp/bin` to `PATH` in your shell's
+startup files. It sets up:
+
+- **femp.**
+- **The Fe 26.6.0 compiler** built with the EVM, native and WebAssembly backends. Released Fe
+  binaries lack the WebAssembly backend, so femp ships its own build.
+- **Node.js**, for WebAssembly, when no Node.js 20 or newer is on `PATH`. It is kept in
+  `~/.femp/node` for femp alone and does not change which `node` other programs see.
+- **A C compiler**, for native executables, when none is found:
+  - on Linux, `gcc` from the system package manager (`apt-get`, `dnf`, `yum`, `pacman` or
+    `zypper`);
+  - on macOS, Apple's Command Line Tools.
+
+  The installer asks first, because this step may need your password.
+
+Every download is checked against a SHA-256 list. Options go after `sh -s --`:
+
+```sh
+curl -fsSL https://github.com/emeieiron/femp/releases/latest/download/installer.sh | sh -s -- --yes
+```
+
+| Option | Effect |
+| --- | --- |
+| `--yes` | Install a missing C compiler without asking, for scripts and CI. |
+| `--no-modify-path` | Leave shell startup files alone. |
+| `--skip-deps` | Install femp and Fe only. |
+
+`FEMP_VERSION=v0.1.0` installs a specific release. To uninstall, delete `~/.femp` and the line
+the installer added to `~/.profile`, `~/.bashrc`, `~/.bash_profile` or `~/.zshrc`.
 
 The native and WebAssembly backends of Fe 26.6 are experimental. `femp doctor` reports them as
-such and tells you when one is unavailable on your machine.
+such and tells you when one is unavailable on your machine. Native executables can be built on
+x86-64 Linux and Apple silicon.
 
 ## Getting started
 
 ```sh
-cargo install --path crates/femp-cli   # installs the `femp` binary
-femp toolchain install                 # builds Fe 26.6.0 with all three backends (a few minutes)
 femp new my-app && cd my-app
 femp doctor
 femp test
@@ -36,9 +65,19 @@ femp prop
 femp build
 ```
 
-`femp toolchain install` compiles Fe from source because released Fe 26.6.0 binaries do not
-include the WebAssembly backend. The compiler is kept under `~/.femp/toolchains/` (override with
-`FEMP_HOME`). To use a compiler you built yourself, point `FEMP_FE` at it.
+### Building from source
+
+Building from source needs Rust 1.88 or newer for femp, Rust 1.97 or newer and npm for the Fe
+compiler, Node.js 20 or newer, and a C compiler.
+
+```sh
+cargo install --path crates/femp-cli   # installs the `femp` binary
+femp toolchain install                 # builds Fe 26.6.0 with all three backends (a few minutes)
+```
+
+`femp toolchain install` compiles Fe from source into `~/.femp/toolchains/` (override with
+`FEMP_HOME`). To use a compiler you built yourself, point `FEMP_FE` at it; to use a particular
+Node.js, point `FEMP_NODE` at it.
 
 ## Commands
 
@@ -141,6 +180,7 @@ modes and options.
 | `crates/femp-cli` | The `femp` binary and the templates for `femp new`. |
 | `runtime/wasm-host` | The JavaScript host runtime shipped with WebAssembly bindings, and the property-harness runner. |
 | `examples/vesting` | The demonstrator project. |
+| `install/` | The installer and the script that builds release archives (`.github/workflows/release.yml` runs it). |
 | `docs/` | [Architecture](docs/architecture.md), [project layout](docs/project-layout.md), [property testing](docs/property-testing.md), [adding a platform](docs/adding-a-platform.md). |
 
 ## Development
@@ -152,3 +192,20 @@ node --test runtime/wasm-host/*.test.js
 ```
 
 Tests that need the Fe compiler skip themselves when it is not installed.
+
+## Releasing
+
+Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`. The workflow:
+
+1. builds an archive per host with `install/build-archive.sh`, containing femp and the Fe
+   compiler;
+2. installs each archive with the installer as a smoke test;
+3. publishes the archives, `installer.sh` and `SHA256SUMS` as a GitHub release.
+
+The installer URL always points at the latest release.
+
+## License
+
+femp is licensed under the [Apache License, Version 2.0](LICENSE). Release archives also
+contain the Fe compiler, which is licensed under the Apache License, Version 2.0 as well
+(`LICENSE-fe`).
