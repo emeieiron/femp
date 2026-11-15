@@ -6,6 +6,7 @@ use crate::environment::{Environment, OptLevel};
 use crate::error::{Error, Result};
 use crate::outcome::TestRun;
 use crate::project::{Module, Project};
+use crate::property::{Executor, HarnessRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PlatformId(String);
@@ -90,6 +91,19 @@ pub trait Platform {
         built: &[Artifact],
         dist_dir: &Path,
     ) -> Result<Vec<Artifact>>;
+
+    /// Compiles a property harness for the request's suite and starts an
+    /// executor for it. Platforms that cannot run properties keep the default.
+    fn property_harness(
+        &self,
+        _cx: &Context<'_>,
+        _request: &HarnessRequest<'_>,
+    ) -> Result<Box<dyn Executor>> {
+        Err(Error::Unavailable {
+            platform: self.id().to_string(),
+            reason: "this platform cannot run property tests".to_string(),
+        })
+    }
 }
 
 #[derive(Default)]
