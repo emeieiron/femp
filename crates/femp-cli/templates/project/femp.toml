@@ -1,0 +1,23 @@
+[project]
+name = "{{name}}"
+version = "0.1.0"
+
+[toolchain]
+fe = "{{fe_version}}"
+
+# A module without a platform is shared: it is compiled into every platform
+# module that depends on it and its tests run on every platform.
+[modules.core]
+path = "shared"
+
+[modules.contracts]
+path = "evm"
+platform = "evm"
+
+[modules.cli]
+path = "native"
+platform = "native"
+
+[modules.web]
+path = "wasm"
+platform = "wasm"

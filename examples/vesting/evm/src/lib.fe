@@ -1,0 +1,198 @@
+use std::evm::{Evm, Log, revert_error}
+use vesting_core::{Clock, Position, Schedule}
+
+msg VestingMsg {
+    #[selector = sol("vestedAt(uint64)")]
+    VestedAt { timestamp: u64 } -> u64,
+    #[selector = sol("claimableAt(uint64)")]
+    ClaimableAt { timestamp: u64 } -> u64,
+    #[selector = sol("claimable()")]
+    Claimable -> u64,
+    #[selector = sol("claimed()")]
+    Claimed -> u64,
+    #[selector = sol("claim(uint64)")]
+    Claim { amount: u64 } -> u64,
+}
+
+#[event]
+pub struct TokensClaimed { pub amount: u64, pub total_claimed: u64 }
+
+#[error]
+pub struct VestingFailed { pub code: u32 }
+
+struct BlockClock { timestamp: u64 }
+
+impl Clock for BlockClock {
+    fn now(self) -> u64 {
+        self.timestamp
+    }
+}
+
+struct VestingStore { total: u64, start: u64, cliff: u64, duration: u64, claimed: u64 }
+
+fn block_clock() -> BlockClock uses (ctx: Ctx) {
+    BlockClock { timestamp: ctx.timestamp().as_seconds().downcast_truncate() }
+}
+
+fn position(total: u64, start: u64, cliff: u64, duration: u64, claimed: u64) -> Position {
+    Position { schedule: Schedule { total, start, cliff, duration }, claimed }
+}
+
+pub contract Vesting uses (ctx: Ctx, log: mut Log) {
+    mut store: VestingStore,
+
+    init(total: u64, start: u64, cliff: u64, duration: u64)
+    uses (mut store)
+    {
+        match Schedule::new(total, start, cliff, duration) {
+            Result::Ok(schedule) => {
+                store.total = schedule.total
+                store.start = schedule.start
+                store.cliff = schedule.cliff
+                store.duration = schedule.duration
+                store.claimed = 0
+            },
+            Result::Err(error) => revert_error(VestingFailed { code: error.code() }),
+        }
+    }
+
+    recv VestingMsg {
+        VestedAt { timestamp } -> u64 uses (store) {
+            position(
+                total: store.total,
+                start: store.start,
+                cliff: store.cliff,
+                duration: store.duration,
+                claimed: store.claimed,
+            )
+                .schedule
+                .vested_at(timestamp)
+        }
+
+        ClaimableAt { timestamp } -> u64 uses (store) {
+            position(
+                total: store.total,
+                start: store.start,
+                cliff: store.cliff,
+                duration: store.duration,
+                claimed: store.claimed,
+            )
+                .claimable_at(timestamp)
+        }
+
+        Claimable -> u64 uses (store, ctx) {
+            let current = position(
+                total: store.total,
+                start: store.start,
+                cliff: store.cliff,
+                duration: store.duration,
+                claimed: store.claimed,
+            )
+            with (Clock = block_clock()) {
+                vesting_core::claimable_now(current)
+            }
+        }
+
+        Claimed -> u64 uses (store) {
+            store.claimed
+        }
+
+        Claim { amount } -> u64 uses (mut store, ctx, mut log) {
+            let current = position(
+                total: store.total,
+                start: store.start,
+                cliff: store.cliff,
+                duration: store.duration,
+                claimed: store.claimed,
+            )
+            let outcome = with (Clock = block_clock()) {
+                vesting_core::claim_now(current, amount)
+            }
+            match outcome {
+                Result::Ok(updated) => {
+                    store.claimed = updated.claimed
+                    log.emit(TokensClaimed { amount, total_claimed: updated.claimed })
+                    updated.claimed
+                },
+                Result::Err(error) => revert_error(VestingFailed { code: error.code() }),
+            }
+        }
+    }
+}
+
+#[test]
+fn reports_vesting_from_the_shared_schedule() uses (evm: mut Evm) {
+    let vesting = evm.create2<Vesting>(value: Wei::zero(), args: (1000, 100, 50, 200), salt: 0)
+
+    let before_cliff: u64 = evm
+        .call(
+            addr: vesting,
+            gas: 100000,
+            value: Wei::zero(),
+            message: VestingMsg::VestedAt { timestamp: 149 },
+        )
+    assert(before_cliff == 0)
+    let halfway: u64 = evm
+        .call(
+            addr: vesting,
+            gas: 100000,
+            value: Wei::zero(),
+            message: VestingMsg::VestedAt { timestamp: 200 },
+        )
+    assert(halfway == 500)
+    let claimable: u64 = evm
+        .call(
+            addr: vesting,
+            gas: 100000,
+            value: Wei::zero(),
+            message: VestingMsg::ClaimableAt { timestamp: 300 },
+        )
+    assert(claimable == 1000)
+}
+
+#[test]
+fn claiming_updates_storage() uses (evm: mut Evm) {
+    let vesting = evm.create2<Vesting>(value: Wei::zero(), args: (1000, 0, 0, 1), salt: 1)
+
+    let total_claimed: u64 = evm
+        .call(
+            addr: vesting,
+            gas: 200000,
+            value: Wei::zero(),
+            message: VestingMsg::Claim { amount: 400 },
+        )
+    assert(total_claimed == 400)
+    let claimed: u64 = evm
+        .call(
+            addr: vesting,
+            gas: 100000,
+            value: Wei::zero(),
+            message: VestingMsg::Claimed {},
+        )
+    assert(claimed == 400)
+    let remaining: u64 = evm
+        .call(
+            addr: vesting,
+            gas: 100000,
+            value: Wei::zero(),
+            message: VestingMsg::Claimable {},
+        )
+    assert(remaining == 600)
+}
+
+#[test(should_revert)]
+fn claiming_more_than_vested_reverts() uses (evm: mut Evm) {
+    let vesting = evm.create2<Vesting>(value: Wei::zero(), args: (1000, 0, 0, 1), salt: 2)
+    let _: u64 = evm
+        .call(
+            addr: vesting,
+            gas: 200000,
+            value: Wei::zero(),
+            message: VestingMsg::Claim { amount: 1001 },
+        )
+}
+
+#[test(should_revert)]
+fn invalid_schedules_cannot_be_deployed() uses (evm: mut Evm) {
+    evm.create2<Vesting>(value: Wei::zero(), args: (0, 0, 0, 1), salt: 3)
+}

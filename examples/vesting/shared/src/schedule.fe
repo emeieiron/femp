@@ -1,0 +1,41 @@
+use core::marker::Copy
+use ingot::error::VestingError
+
+pub struct Schedule { pub total: u64, pub start: u64, pub cliff: u64, pub duration: u64 }
+
+impl Copy for Schedule {}
+
+impl Schedule {
+    pub fn new(total: u64, start: u64, cliff: u64, duration: u64) -> Result<
+        VestingError,
+        Schedule,
+    > {
+        if total == 0 {
+            return Result::Err(VestingError::ZeroTotal)
+        }
+        if duration == 0 {
+            return Result::Err(VestingError::ZeroDuration)
+        }
+        if cliff > duration {
+            return Result::Err(VestingError::CliffExceedsDuration)
+        }
+        if (start as u256) + (duration as u256) > (u64::max() as u256) {
+            return Result::Err(VestingError::EndOverflow)
+        }
+        Result::Ok(Schedule { total, start, cliff, duration })
+    }
+
+    pub fn vested_at(self, _ now: u64) -> u64 {
+        if now < self.start + self.cliff {
+            return 0
+        }
+        let elapsed = now - self.start
+        if elapsed >= self.duration {
+            return self.total
+        }
+        // Widened so that `total * elapsed` cannot overflow; the quotient is
+        // below `total`, so it always fits back into 64 bits.
+        let vested = (self.total as u256) * (elapsed as u256) / (self.duration as u256)
+        vested.downcast_unchecked()
+    }
+}

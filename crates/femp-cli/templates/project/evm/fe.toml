@@ -1,0 +1,7 @@
+[ingot]
+name = "{{ident}}_evm"
+version = "0.1.0"
+target = "evm"
+
+[dependencies]
+{{ident}}_core = "../shared"

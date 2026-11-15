@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[workspace.dependencies]
+femp-core = { path = "crates/femp-core" }
+femp-toolchain = { path = "crates/femp-toolchain" }
+femp-evm = { path = "crates/femp-evm" }
+femp-native = { path = "crates/femp-native" }
+femp-wasm = { path = "crates/femp-wasm" }
+femp-testing = { path = "crates/femp-testing" }
+
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+toml = "0.8"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

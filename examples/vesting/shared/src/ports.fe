@@ -1,0 +1,17 @@
+use ingot::error::VestingError
+use ingot::position::Position
+
+/// Seconds since the Unix epoch.
+pub trait Clock {
+    fn now(self) -> u64
+}
+
+pub fn claimable_now(_ position: Position) -> u64 uses (clock: Clock) {
+    position.claimable_at(clock.now())
+}
+
+pub fn claim_now(_ position: Position, amount: u64) -> Result<VestingError, Position>
+uses (clock: Clock)
+{
+    position.claim(amount, now: clock.now())
+}

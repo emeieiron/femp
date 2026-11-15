@@ -1,0 +1,43 @@
+use core::marker::Copy
+use ingot::error::VestingError
+use ingot::schedule::Schedule
+
+pub struct Position { pub schedule: Schedule, pub claimed: u64 }
+
+impl Copy for Position {}
+
+impl Position {
+    pub fn open(_ schedule: Schedule) -> Position {
+        Position { schedule, claimed: 0 }
+    }
+
+    /// Rebuilds a position from state kept outside this library, such as
+    /// contract storage or a caller's arguments.
+    pub fn restore(_ schedule: Schedule, claimed: u64) -> Result<VestingError, Position> {
+        if claimed > schedule.total {
+            return Result::Err(VestingError::ClaimedExceedsTotal)
+        }
+        Result::Ok(Position { schedule, claimed })
+    }
+
+    pub fn claimable_at(self, _ now: u64) -> u64 {
+        let vested = self.schedule.vested_at(now)
+        if vested > self.claimed {
+            vested - self.claimed
+        } else {
+            0
+        }
+    }
+
+    pub fn claim(self, amount: u64, now: u64) -> Result<VestingError, Position> {
+        if amount == 0 {
+            return Result::Err(VestingError::ZeroClaim)
+        }
+        if amount > self.claimable_at(now) {
+            return Result::Err(VestingError::ExceedsClaimable)
+        }
+        Result::Ok(
+            Position { schedule: self.schedule, claimed: self.claimed + amount },
+        )
+    }
+}

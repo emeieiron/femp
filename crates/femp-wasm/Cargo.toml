@@ -1,0 +1,18 @@
+[package]
+name = "femp-wasm"
+description = "WebAssembly platform adapter for Fe Multiplatform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+femp-toolchain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

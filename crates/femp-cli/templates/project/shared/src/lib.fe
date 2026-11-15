@@ -1,0 +1,29 @@
+pub const BASIS_POINTS: u64 = 10000
+
+/// The fee on `amount` at a rate in basis points, rounded down. Rates above
+/// 100% are treated as 100%.
+pub fn fee(amount: u64, rate: u64) -> u64 {
+    let capped = if rate > BASIS_POINTS {
+        BASIS_POINTS
+    } else {
+        rate
+    }
+    // Widened so the product cannot overflow; the result is at most `amount`.
+    let scaled = (amount as u256) * (capped as u256) / (BASIS_POINTS as u256)
+    scaled.downcast_unchecked()
+}
+
+#[test]
+fn charges_the_rate() {
+    assert(fee(amount: 20000, rate: 250) == 500)
+}
+
+#[test]
+fn rounds_down() {
+    assert(fee(amount: 999, rate: 1) == 0)
+}
+
+#[test]
+fn caps_the_rate() {
+    assert(fee(amount: 500, rate: 20000) == 500)
+}

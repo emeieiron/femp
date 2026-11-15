@@ -1,0 +1,15 @@
+[package]
+name = "femp-toolchain"
+description = "Locates, installs, and invokes the Fe compiler for Fe Multiplatform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

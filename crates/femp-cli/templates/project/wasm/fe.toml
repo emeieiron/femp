@@ -1,0 +1,7 @@
+[ingot]
+name = "{{ident}}_web"
+version = "0.1.0"
+target = "wasm"
+
+[dependencies]
+{{ident}}_core = "../shared"

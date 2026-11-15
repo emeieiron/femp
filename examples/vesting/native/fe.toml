@@ -1,0 +1,7 @@
+[ingot]
+name = "vesting_cli"
+version = "0.1.0"
+target = "native"
+
+[dependencies]
+vesting_core = "../shared"

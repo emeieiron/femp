@@ -1,0 +1,301 @@
+{
+  "manifest_version": 1,
+  "module": {
+    "file": "probe.wasm",
+    "sha256": "d20bbdd6a0139bafced0ae4e2ad79902a16ff77c2c6913f0239d3e85e2ec6b76",
+    "size": 8030,
+    "initial_memory_pages": 18
+  },
+  "contract_version": 1,
+  "optimization": "1",
+  "compiler": "fe 26.6.0 (5b3f96a)",
+  "imports": [
+    {
+      "module": "env",
+      "name": "sys_wasm_abort",
+      "kind": "function",
+      "type": {
+        "params": ["i32"],
+        "results": []
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_files_close",
+      "kind": "function",
+      "type": {
+        "params": ["i32"],
+        "results": []
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_files_open",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32"],
+        "results": ["i64"]
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_files_size",
+      "kind": "function",
+      "type": {
+        "params": ["i32"],
+        "results": ["i64"]
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_log_u64",
+      "kind": "function",
+      "type": {
+        "params": ["i64"],
+        "results": []
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_now_ms",
+      "kind": "function",
+      "type": {
+        "params": [],
+        "results": ["i64"]
+      }
+    }
+  ],
+  "exports": [
+    {
+      "name": "add",
+      "kind": "function",
+      "params": [
+        {
+          "name": "a",
+          "type": "u64",
+          "wasm": ["i64"]
+        },
+        {
+          "name": "b",
+          "type": "u64",
+          "wasm": ["i64"]
+        }
+      ],
+      "result": {
+        "type": "u64",
+        "wasm": ["i64"]
+      }
+    },
+    {
+      "name": "alloc",
+      "kind": "function",
+      "role": "allocator",
+      "params": [
+        {
+          "name": "size",
+          "type": "u32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "u32",
+        "wasm": ["i32"]
+      }
+    },
+    {
+      "name": "arena_mark",
+      "kind": "function",
+      "role": "allocator",
+      "params": [],
+      "result": {
+        "type": "u32",
+        "wasm": ["i32"]
+      }
+    },
+    {
+      "name": "arena_release",
+      "kind": "function",
+      "role": "allocator",
+      "params": [
+        {
+          "name": "mark",
+          "type": "u32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": null
+    },
+    {
+      "name": "double_up_to_100",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "u32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "Reply",
+        "wasm": ["i64"]
+      }
+    },
+    {
+      "name": "file_size",
+      "kind": "function",
+      "params": [
+        {
+          "name": "name",
+          "type": "HostText",
+          "wasm": ["i32", "i32"]
+        }
+      ],
+      "result": {
+        "type": "Reply",
+        "wasm": ["i64"]
+      }
+    },
+    {
+      "name": "invert",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "bool",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "bool",
+        "wasm": ["i32"]
+      }
+    },
+    {
+      "name": "is_even",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "u32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "bool",
+        "wasm": ["i32"]
+      }
+    },
+    {
+      "name": "memory",
+      "kind": "memory"
+    },
+    {
+      "name": "narrow",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "i8",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "i8",
+        "wasm": ["i32"]
+      }
+    },
+    {
+      "name": "negate",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "i32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "i32",
+        "wasm": ["i32"]
+      }
+    },
+    {
+      "name": "open_and_keep",
+      "kind": "function",
+      "params": [
+        {
+          "name": "name",
+          "type": "HostText",
+          "wasm": ["i32", "i32"]
+        }
+      ],
+      "result": {
+        "type": "Reply",
+        "wasm": ["i64"]
+      }
+    },
+    {
+      "name": "report",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "u64",
+          "wasm": ["i64"]
+        }
+      ],
+      "result": null
+    },
+    {
+      "name": "stamp",
+      "kind": "function",
+      "params": [],
+      "result": {
+        "type": "u64",
+        "wasm": ["i64"]
+      }
+    },
+    {
+      "name": "stop",
+      "kind": "function",
+      "params": [
+        {
+          "name": "code",
+          "type": "u32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": null
+    },
+    {
+      "name": "text_length",
+      "kind": "function",
+      "params": [
+        {
+          "name": "text",
+          "type": "HostText",
+          "wasm": ["i32", "i32"]
+        }
+      ],
+      "result": {
+        "type": "u32",
+        "wasm": ["i32"]
+      }
+    },
+    {
+      "name": "widest",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "u32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "u32",
+        "wasm": ["i32"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+pub enum VestingError {
+    ZeroTotal,
+    ZeroDuration,
+    CliffExceedsDuration,
+    EndOverflow,
+    ZeroClaim,
+    ExceedsClaimable,
+    ClaimedExceedsTotal,
+}
+
+impl VestingError {
+    // These numbers are the error contract shared by every platform: the
+    // contract reverts with them, the CLI exits with them, and the browser
+    // module aborts with them. Never renumber an existing variant.
+    pub fn code(self) -> u32 {
+        match self {
+            VestingError::ZeroTotal => 1,
+            VestingError::ZeroDuration => 2,
+            VestingError::CliffExceedsDuration => 3,
+            VestingError::EndOverflow => 4,
+            VestingError::ZeroClaim => 5,
+            VestingError::ExceedsClaimable => 6,
+            VestingError::ClaimedExceedsTotal => 7,
+        }
+    }
+}

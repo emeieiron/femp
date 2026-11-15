@@ -1,0 +1,78 @@
+// Exercises every value shape and host operation of the WebAssembly host
+// contract. `probe.wasm` and `probe.manifest.json` are built from this file:
+//
+//   fe build --backend wasm --out-dir runtime/wasm-host/test runtime/wasm-host/test/probe.fe
+use std::wasm::{Abort, Clock, HostText, Log, Reply}
+use std::wasm::files::{Files, close, open, size}
+
+pub fn add(a: u64, b: u64) -> u64 {
+    a + b
+}
+
+pub fn negate(value: i32) -> i32 {
+    0 - value
+}
+
+pub fn narrow(value: i8) -> i8 {
+    value
+}
+
+pub fn widest(value: u32) -> u32 {
+    value
+}
+
+pub fn is_even(value: u32) -> bool {
+    value % 2 == 0
+}
+
+pub fn invert(value: bool) -> bool {
+    !value
+}
+
+pub fn text_length(text: HostText) -> u32 {
+    text.len()
+}
+
+pub fn double_up_to_100(value: u32) -> Reply {
+    if value > 100 {
+        Reply::error(7)
+    } else {
+        Reply::ok(value * 2)
+    }
+}
+
+pub fn stamp() -> u64 uses (clock: mut Clock) {
+    clock.now_ms()
+}
+
+pub fn report(value: u64) uses (log: mut Log) {
+    log.log_u64(value)
+}
+
+pub fn stop(code: u32) uses (host: mut Abort) {
+    host.abort(code)
+}
+
+pub fn file_size(name: HostText) -> Reply uses (files: mut Files) {
+    match open(name.copy()) {
+        Result::Ok(handle) => {
+            let outcome = match size(handle) {
+                Result::Ok(length) => Reply::ok(length),
+                Result::Err(error) => Reply::error(error.code()),
+            }
+            close(handle)
+            outcome
+        },
+        Result::Err(error) => Reply::error(error.code()),
+    }
+}
+
+pub fn open_and_keep(name: HostText) -> Reply uses (files: mut Files) {
+    match open(name.copy()) {
+        Result::Ok(handle) => {
+            core::mem::forget(handle)
+            Reply::ok(1)
+        },
+        Result::Err(error) => Reply::error(error.code()),
+    }
+}

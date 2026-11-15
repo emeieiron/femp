@@ -1,0 +1,16 @@
+[package]
+name = "femp-native"
+description = "Native executable platform adapter for Fe Multiplatform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+femp-toolchain.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

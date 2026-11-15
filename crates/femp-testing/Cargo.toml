@@ -1,0 +1,12 @@
+[package]
+name = "femp-testing"
+description = "Runs tests on every platform and compares the outcomes for Fe Multiplatform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+
+[lints]
+workspace = true

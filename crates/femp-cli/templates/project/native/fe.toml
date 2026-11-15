@@ -1,0 +1,7 @@
+[ingot]
+name = "{{ident}}_cli"
+version = "0.1.0"
+target = "native"
+
+[dependencies]
+{{ident}}_core = "../shared"

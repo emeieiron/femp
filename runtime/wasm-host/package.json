@@ -1,0 +1,10 @@
+{
+  "name": "femp-wasm-host",
+  "private": true,
+  "type": "module",
+  "main": "./host.js",
+  "types": "./host.d.ts",
+  "scripts": {
+    "test": "node --test"
+  }
+}

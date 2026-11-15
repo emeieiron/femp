@@ -1,0 +1,28 @@
+use std::evm::Evm
+use {{ident}}_core::fee
+
+msg FeesMsg {
+    #[selector = sol("fee(uint64,uint64)")]
+    Fee { amount: u64, rate: u64 } -> u64,
+}
+
+pub contract Fees {
+    recv FeesMsg {
+        Fee { amount, rate } -> u64 {
+            fee(amount, rate)
+        }
+    }
+}
+
+#[test]
+fn quotes_fees_on_chain() uses (evm: mut Evm) {
+    let fees = evm.create2<Fees>(value: Wei::zero(), args: (), salt: 0)
+    let quoted: u64 = evm
+        .call(
+            addr: fees,
+            gas: 100000,
+            value: Wei::zero(),
+            message: FeesMsg::Fee { amount: 20000, rate: 250 },
+        )
+    assert(quoted == 500)
+}
