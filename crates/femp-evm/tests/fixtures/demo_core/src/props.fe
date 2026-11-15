@@ -1,0 +1,7 @@
+pub fn holds(a: u64, _ b: bool) -> bool {
+    if b { a / 2 <= a } else { a + 0 == a }
+}
+
+pub fn negate(x: i64) -> i64 {
+    0 - x
+}

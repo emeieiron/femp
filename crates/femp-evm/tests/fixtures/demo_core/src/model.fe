@@ -1,0 +1,31 @@
+use core::marker::Copy
+
+pub struct Counter { pub total: u64, pub last: i8 }
+
+impl Copy for Counter {}
+
+impl Counter {
+    pub fn new(start: u8) -> Counter {
+        Counter { total: start as u64, last: 0 }
+    }
+
+    pub fn add(self, amount: u64) -> Counter {
+        Counter { total: self.total + amount, last: self.last }
+    }
+
+    pub fn flip(self, _ sign: i8) -> Counter {
+        Counter { total: self.total, last: 0 - sign }
+    }
+
+    pub fn small(self) -> bool {
+        self.total < 1000
+    }
+
+    pub fn value(self) -> u64 {
+        self.total
+    }
+
+    pub fn sign(self) -> i8 {
+        self.last
+    }
+}

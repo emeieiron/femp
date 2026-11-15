@@ -1,6 +1,7 @@
 mod abi;
 mod bindings;
 mod build;
+mod harness;
 
 use std::path::Path;
 
@@ -10,6 +11,7 @@ use femp_core::environment::Environment;
 use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
+use femp_core::property::{Executor, HarnessRequest};
 use femp_toolchain::module_ops;
 
 pub use build::{ABI, BYTECODE, METADATA, RUNTIME_BYTECODE};
@@ -98,5 +100,13 @@ impl Platform for EvmPlatform {
         dist_dir: &Path,
     ) -> Result<Vec<Artifact>> {
         copy_flat(built, &dist_dir.join(&module.name))
+    }
+
+    fn property_harness(
+        &self,
+        cx: &Context<'_>,
+        request: &HarnessRequest<'_>,
+    ) -> Result<Box<dyn Executor>> {
+        harness::start(cx, &self.id, BACKEND, request)
     }
 }
