@@ -19,9 +19,9 @@ impl fmt::Display for Location {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Param {
     pub name: String,
-    /// Whether callers pass the argument with its label (`name: value`);
-    /// false for parameters declared as `_ name`.
-    pub labelled: bool,
+    /// The label callers write before the argument (`label: value`); `None`
+    /// for parameters declared as `_ name`.
+    pub label: Option<String>,
     pub ty: Ty,
     /// The generator specification from `#[gen(..)]`, `any` by default.
     pub generator: String,
