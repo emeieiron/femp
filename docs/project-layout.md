@@ -49,6 +49,32 @@ target = "wasm"
 vesting_core = "../shared"
 ```
 
+## Generated source
+
+A module can declare a named generator in `femp.toml`.
+
+~~~toml
+[modules.core.generate.serializers]
+command = ["my-serializer-generator", "--source", "src/models.fe", "--type", "Transfer"]
+output = "src/serializers.fe"
+~~~
+
+`femp check`, `femp build`, `femp test`, and `femp package` run each declared generator
+once for each participating module before invoking a backend. FeMP starts the executable in the module's original
+directory, passes the arguments directly, and reads UTF-8 Fe source from standard output.
+Use standard error for diagnostics. A failing generator stops the command before compilation.
+
+FeMP writes the source to the declared path inside the staged ingot. Each path must be a
+unique `.fe` destination under `src/` and must be absent from the original ingot. The staged
+ingots are private to the FeMP invocation and are removed when it finishes. FeMP writes
+platform artifacts and packages to their usual directories.
+
+Run `femp generate` to create the configured outputs in their source locations for code
+navigation and direct Fe tooling. Put those generated paths in the project's ignore list.
+Subsequent FeMP builds refresh these copies when their generators run. The command protects
+authored files and requires its own generated header before replacing an existing file.
+`femp doctor` reports missing generator executables without running them.
+
 ## Shared and platform modules
 
 | | Shared module | Platform module |
@@ -147,11 +173,11 @@ Parameters and results may be `bool`, integers of up to 64 bits, text in
 (`std::wasm::HostText`) and a tagged reply out (`std::wasm::Reply`). In the bindings, 64-bit
 integers are `bigint` and narrower ones `number`.
 
-Fe 26.6 compiles a single file to WebAssembly, so `femp build` first merges the module with the
-project modules it depends on into `build/wasm/<module>/stage/<ingot name>.fe` and compiles
-that. Two consequences:
+Fe 26.6 compiles a single file to WebAssembly. FeMP checks the original ingot with Fe and
+then bundles its dependencies into `build/wasm/<module>/stage/<ingot name>.fe` for builds.
+The bundler follows ingot paths, workspace dependencies, and pinned Git dependencies
+materialized by the Fe compiler. Declare library dependencies in `fe.toml`. The FeMP
+manifest lists application modules and generator configurations.
 
-- A `wasm` module can only depend on modules of the same project.
-- A module's own top-level module names must differ from the ingot names of its dependencies.
-
-`femp check` and `femp test` work on the original ingots, so diagnostics point at your files.
+`femp check` also checks the bundled WASM source for platform entry points. `femp test`
+runs the Fe tests in ingot context.

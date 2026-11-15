@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use crate::ingot::{DependencySource, INGOT_FILE, IngotDependency, IngotManifest, ROOT_SOURCE};
 use crate::manifest::{MANIFEST_FILE, Manifest};
 use crate::platform::PlatformId;
+use crate::workspace::Workspace;
 
 pub const BUILD_DIR: &str = "build";
 pub const DIST_DIR: &str = "dist";
@@ -19,6 +20,7 @@ pub enum ModuleRole {
 pub struct Module {
     pub name: String,
     pub dir: PathBuf,
+    pub source_dir: PathBuf,
     pub ingot: IngotManifest,
     pub role: ModuleRole,
 }
@@ -37,6 +39,46 @@ impl Module {
 
     pub fn root_source(&self) -> PathBuf {
         self.dir.join(ROOT_SOURCE)
+    }
+    /// Point compiler locations at authored sources when a staged copy was compiled.
+    pub fn diagnostics(&self, text: &str) -> String {
+        if self.source_dir == self.dir {
+            return text.to_string();
+        }
+        text.split_inclusive('\n')
+            .map(|line| {
+                let Some((prefix, location)) = line.split_once("─ ") else {
+                    return line.to_string();
+                };
+                let ending = if line.ends_with('\n') { "\n" } else { "" };
+                let mut parts = location.trim_end().rsplitn(3, ':');
+                let (Some(column), Some(row), Some(path)) =
+                    (parts.next(), parts.next(), parts.next())
+                else {
+                    return line.to_string();
+                };
+                let path = Path::new(path);
+                let relative = path.strip_prefix(&self.dir).unwrap_or(path);
+                if !relative.is_relative() || !relative.starts_with("src") {
+                    return line.to_string();
+                }
+                let authored = self.source_dir.join(relative);
+                if !authored.is_file() {
+                    return line.to_string();
+                }
+                format!("{prefix}─ {}:{row}:{column}{ending}", authored.display())
+            })
+            .collect()
+    }
+
+    pub fn compiler_error(&self, error: Error) -> Error {
+        match error {
+            Error::Command { command, output } => Error::Command {
+                command,
+                output: self.diagnostics(&output),
+            },
+            other => other,
+        }
     }
 }
 
@@ -90,6 +132,7 @@ impl Project {
                         Some(id) => ModuleRole::Platform(PlatformId::new(id)),
                         None => ModuleRole::Shared,
                     },
+                    source_dir: dir.clone(),
                     dir,
                 })
             })
@@ -154,9 +197,26 @@ impl Project {
                 self.modules.iter().find(|other| other.dir == target)
             }
             DependencySource::Name(name) => {
+                if let Ok(Some(workspace)) = Workspace::discover(&module.dir) {
+                    if let Some(inherited) = workspace
+                        .dependencies
+                        .iter()
+                        .find(|item| item.alias == dependency.alias)
+                    {
+                        // Workspace definitions take precedence over member names.
+                        if let DependencySource::Path(path) = &inherited.source {
+                            let target = workspace.root.join(path).canonicalize().ok()?;
+                            return self.modules.iter().find(|other| other.dir == target);
+                        }
+                        return None;
+                    }
+                    if let Some(target) = workspace.members.get(name) {
+                        return self.modules.iter().find(|other| &other.dir == target);
+                    }
+                }
                 self.modules.iter().find(|other| &other.ingot.name == name)
             }
-            DependencySource::Remote => None,
+            DependencySource::Remote(_) => None,
         }
     }
 

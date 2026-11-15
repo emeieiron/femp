@@ -1,6 +1,7 @@
 use std::env;
 
 use anyhow::Result;
+use femp_core::Error;
 use femp_core::environment::Environment;
 use femp_core::layering;
 use femp_core::platform::{Capability, PlatformId, PlatformRegistry, Stability};
@@ -9,6 +10,7 @@ use femp_toolchain::probe;
 
 use crate::commands::toolchain::pinned_version;
 use crate::console;
+use crate::generation;
 use crate::registry;
 
 pub fn run() -> Result<bool> {
@@ -84,11 +86,19 @@ fn print_platforms(registry: &PlatformRegistry, environment: &Environment) -> Ve
 }
 
 fn print_project(registry: &PlatformRegistry, unavailable: &[PlatformId]) -> bool {
-    let Some(project) = env::current_dir()
-        .ok()
-        .and_then(|dir| Project::discover(&dir).ok())
-    else {
-        return true;
+    let project = match env::current_dir() {
+        Ok(dir) => match Project::discover(&dir) {
+            Ok(project) => project,
+            Err(Error::ProjectNotFound { .. }) => return true,
+            Err(error) => {
+                console::error(&error.to_string());
+                return false;
+            }
+        },
+        Err(error) => {
+            console::error(&error.to_string());
+            return false;
+        }
     };
     console::line("Project");
     console::line(format!(
@@ -115,5 +125,19 @@ fn print_project(registry: &PlatformRegistry, unavailable: &[PlatformId]) -> boo
             blocked.join(", ")
         ));
     }
-    blocked.is_empty()
+    let mut generators_available = true;
+    for module in &project.modules {
+        for (name, generator) in &project.manifest.modules[&module.name].generate {
+            let program = generation::executable(module, generator);
+            if !generation::available(&program) {
+                console::error(&format!(
+                    "generator {}.{name} requires {}",
+                    module.name,
+                    program.display()
+                ));
+                generators_available = false;
+            }
+        }
+    }
+    blocked.is_empty() && generators_available
 }

@@ -67,7 +67,11 @@ impl Platform for WasmPlatform {
     }
 
     fn check(&self, cx: &Context<'_>, module: &Module) -> Result<()> {
-        module_ops::check(cx, BACKEND, module)
+        module_ops::check(cx, BACKEND, module)?;
+        if module.platform() == Some(&self.id) {
+            build::check_bundle(cx, BACKEND, module)?;
+        }
+        Ok(())
     }
 
     fn build(&self, cx: &Context<'_>, module: &Module, out_dir: &Path) -> Result<Vec<Artifact>> {

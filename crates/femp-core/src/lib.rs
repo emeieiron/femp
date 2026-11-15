@@ -11,5 +11,6 @@ pub mod platform;
 pub mod project;
 #[cfg(test)]
 mod testing;
+pub mod workspace;
 
 pub use error::{Error, Result};

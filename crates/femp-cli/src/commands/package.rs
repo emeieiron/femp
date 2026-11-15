@@ -13,7 +13,8 @@ const INDEX_FILE: &str = "manifest.json";
 pub fn run(args: &BuildArgs) -> Result<bool> {
     let session = Session::open()?;
     let platforms = session.select(&args.target.targets)?;
-    let cx = session.context(args.optimize);
+    let inputs = session.prepare(&platforms, false)?;
+    let cx = inputs.context(args.optimize);
     let built = pipeline::build_all(&cx, &platforms)?;
 
     let dist = session.project.root.join(DIST_DIR);
