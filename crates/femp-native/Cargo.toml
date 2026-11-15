@@ -8,8 +8,10 @@ rust-version.workspace = true
 [dependencies]
 femp-core.workspace = true
 femp-toolchain.workspace = true
+femp-harness.workspace = true
 
 [dev-dependencies]
+femp-core = { workspace = true, features = ["fixtures"] }
 tempfile.workspace = true
 
 [lints]

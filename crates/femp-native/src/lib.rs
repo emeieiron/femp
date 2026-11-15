@@ -1,4 +1,5 @@
 mod build;
+mod harness;
 
 use std::path::Path;
 
@@ -8,6 +9,7 @@ use femp_core::environment::{Environment, Host};
 use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
+use femp_core::property::{Executor, HarnessRequest};
 use femp_toolchain::module_ops;
 
 pub use build::EXECUTABLE;
@@ -109,6 +111,14 @@ impl Platform for NativePlatform {
     ) -> Result<Vec<Artifact>> {
         let host = &cx.environment.host;
         copy_flat(built, &dist_dir.join(format!("{}-{}", host.arch, host.os)))
+    }
+
+    fn property_harness(
+        &self,
+        cx: &Context<'_>,
+        request: &HarnessRequest<'_>,
+    ) -> Result<Box<dyn Executor>> {
+        harness::start(cx, &self.id, BACKEND, request)
     }
 }
 

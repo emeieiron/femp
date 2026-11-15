@@ -632,10 +632,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "femp-harness"
+version = "0.1.0"
+dependencies = [
+ "femp-core",
+ "tempfile",
+]
+
+[[package]]
 name = "femp-native"
 version = "0.1.0"
 dependencies = [
  "femp-core",
+ "femp-harness",
  "femp-toolchain",
  "tempfile",
 ]
