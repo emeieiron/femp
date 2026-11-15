@@ -9,6 +9,10 @@ A token vesting library written once and used from three places.
 | `cli` | `native/` | A calculator: `vested`, `claimable`, `claim`. Exits with the error code on failure. |
 | `web` | `wasm/` | The same calculations exported to JavaScript; `web/` is a page that uses them. |
 
+The shared module also declares property tests (`shared/src/properties.fe`) and a state
+machine (`shared/src/model.fe`), and the contract module declares a machine that drives the
+deployed contract (`evm/src/machines.fe`).
+
 Amounts and timestamps are `u64`, the widest integer that crosses the WebAssembly boundary. The
 contract accounts for vesting only; it does not move tokens.
 
@@ -32,6 +36,7 @@ aborts with it.
 
 ```sh
 femp test       # 9 shared tests on evm, native and wasm, plus the contract's own tests
+femp prop       # properties, differentials and machines with generated inputs
 femp build
 ```
 
@@ -62,3 +67,25 @@ all of them return the expected value or error code.
 ```sh
 node e2e/run.mjs
 ```
+
+## Properties on every platform
+
+`femp prop` generates inputs for the entry points marked in the Fe sources and runs them on the
+contract harness (in an embedded EVM), a native executable and a WebAssembly module:
+
+| Entry point | Kind | What it checks |
+| --- | --- | --- |
+| `vested_never_exceeds_total`, `vesting_never_decreases`, `vesting_waits_for_the_cliff`, `vesting_completes_at_the_end`, `claims_stay_within_what_vested` | `#[property]` | Invariants of `Schedule` and `Position` hold for generated schedules. |
+| `schedule_error`, `vested_amount` | `#[differential]` | Every platform rejects the same schedules with the same code and computes the same amounts, including 256-bit intermediate products. |
+| `VestingModel` | `#[machine]` | Sequences of `wait` and `claim` keep claims within the total and within what vested, on all three platforms. |
+| `VestingContractMachine` | `#[machine]` | Claims sent to the deployed contract, with the block clock advancing between them, are accepted and rejected exactly as `Position` predicts, and the stored total matches. |
+
+```
+PASS  contracts::VestingContractMachine     50 runs on evm
+PASS  core::vested_never_exceeds_total      256 cases on evm, native, wasm
+...
+PASS  core::VestingModel                    100 runs on evm, native, wasm
+```
+
+A failure is minimized and saved under `regressions/`, which is replayed first on later runs;
+commit it to keep the case. See [property testing](../../docs/property-testing.md).

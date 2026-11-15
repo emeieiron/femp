@@ -1,0 +1,83 @@
+use core::marker::Copy
+use std::evm::{Address, Call, Create, Ctx}
+use vesting_core::{Position, Schedule}
+use ingot::{Vesting, VestingMsg}
+
+/// Drives a deployed `Vesting` contract with claims while the block clock
+/// advances, and checks it against the shared `Position` logic: both must
+/// accept and reject the same claims and agree on the amount claimed.
+#[machine(steps = "1..=16", runs = 50, clock = "0..=150")]
+pub struct VestingContractMachine {
+    pub vesting: Address,
+    pub expected: Position,
+    pub rejected: u64,
+    pub disagreements: u64,
+}
+
+impl Copy for VestingContractMachine {}
+
+impl VestingContractMachine {
+    #[init]
+    #[gen(total = "1..=1_000_000", start = "0..=500", cliff = "0..=500", duration = "1..=1_000")]
+    pub fn deploy(total: u64, start: u64, cliff: u64, duration: u64) -> VestingContractMachine
+    uses (create: mut Create)
+    {
+        let cliff = if cliff > duration { duration } else { cliff }
+        let vesting = create
+            .create2<Vesting>(
+                value: Wei::zero(),
+                args: (total, start, cliff, duration),
+                salt: 0,
+            )
+        VestingContractMachine {
+            vesting,
+            expected: Position::open(Schedule { total, start, cliff, duration }),
+            rejected: 0,
+            disagreements: 0,
+        }
+    }
+
+    #[command]
+    #[gen(amount = "0..=1_000_000")]
+    pub fn claim(self, amount: u64) -> VestingContractMachine
+    uses (call: mut Call, ctx: Ctx)
+    {
+        let now: u64 = ctx.timestamp().as_seconds().downcast_truncate()
+        let accepted = self.vesting.try_call(VestingMsg::Claim { amount }).success()
+        match self.expected.claim(amount, now) {
+            Result::Ok(updated) => VestingContractMachine {
+                vesting: self.vesting,
+                expected: updated,
+                rejected: self.rejected,
+                disagreements: self.disagreements + if accepted { 0 } else { 1 },
+            },
+            Result::Err(_) => VestingContractMachine {
+                vesting: self.vesting,
+                expected: self.expected,
+                rejected: self.rejected + 1,
+                disagreements: self.disagreements + if accepted { 1 } else { 0 },
+            },
+        }
+    }
+
+    #[invariant]
+    pub fn accepts_the_same_claims(self) -> bool {
+        self.disagreements == 0
+    }
+
+    #[invariant]
+    pub fn stores_the_expected_total(self) -> bool uses (call: Call) {
+        let claimed: u64 = self.vesting.static(VestingMsg::Claimed {})
+        claimed == self.expected.claimed
+    }
+
+    #[observe]
+    pub fn claimed(self) -> u64 {
+        self.expected.claimed
+    }
+
+    #[observe]
+    pub fn rejected(self) -> u64 {
+        self.rejected
+    }
+}

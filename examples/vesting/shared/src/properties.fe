@@ -1,0 +1,153 @@
+use ingot::position::Position
+use ingot::schedule::Schedule
+
+// Most generated schedules are valid; an invalid one makes a property hold
+// trivially, and `schedule_error` checks the rejections themselves.
+
+#[property]
+#[gen(
+    total = "1..=1_000_000_000_000_000_000",
+    start = "0..=1_000_000",
+    cliff = "0..=10_000",
+    duration = "1..=10_000",
+    now = "0..=2_000_000",
+)]
+pub fn vested_never_exceeds_total(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    now: u64,
+) -> bool {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => schedule.vested_at(now) <= total,
+        Result::Err(_) => true,
+    }
+}
+
+#[property]
+#[gen(
+    total = "1..=1_000_000_000_000_000_000",
+    start = "0..=1_000_000",
+    cliff = "0..=10_000",
+    duration = "1..=10_000",
+    earlier = "0..=2_000_000",
+    later = "0..=2_000_000",
+)]
+pub fn vesting_never_decreases(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    earlier: u64,
+    later: u64,
+) -> bool {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => {
+            if earlier <= later {
+                schedule.vested_at(earlier) <= schedule.vested_at(later)
+            } else {
+                schedule.vested_at(later) <= schedule.vested_at(earlier)
+            }
+        },
+        Result::Err(_) => true,
+    }
+}
+
+#[property]
+#[gen(
+    start = "0..=1_000_000",
+    cliff = "0..=10_000",
+    duration = "1..=10_000",
+    now = "0..=2_000_000",
+)]
+pub fn vesting_waits_for_the_cliff(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    now: u64,
+) -> bool {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => now >= start + cliff || schedule.vested_at(now) == 0,
+        Result::Err(_) => true,
+    }
+}
+
+#[property]
+#[gen(
+    start = "0..=1_000_000",
+    cliff = "0..=10_000",
+    duration = "1..=10_000",
+    now = "0..=2_000_000",
+)]
+pub fn vesting_completes_at_the_end(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    now: u64,
+) -> bool {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => now < start + duration || schedule.vested_at(now) == total,
+        Result::Err(_) => true,
+    }
+}
+
+#[property]
+#[gen(
+    total = "1..=1_000_000",
+    start = "0..=1_000",
+    cliff = "0..=1_000",
+    duration = "1..=1_000",
+    claimed = "0..=1_000_000",
+    amount = "0..=1_000_000",
+    now = "0..=3_000",
+)]
+pub fn claims_stay_within_what_vested(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    claimed: u64,
+    amount: u64,
+    now: u64,
+) -> bool {
+    let schedule = match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => schedule,
+        Result::Err(_) => {
+            return true
+        },
+    }
+    let position = match Position::restore(schedule, claimed) {
+        Result::Ok(position) => position,
+        Result::Err(_) => {
+            return true
+        },
+    }
+    match position.claim(amount, now) {
+        Result::Ok(updated) => updated.claimed <= schedule.vested_at(now)
+            && updated.claimed <= total,
+        Result::Err(_) => true,
+    }
+}
+
+/// The error code of a schedule, 0 when it is valid. Every platform must
+/// reject the same schedules for the same reason.
+#[differential]
+pub fn schedule_error(total: u64, start: u64, cliff: u64, duration: u64) -> u32 {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(_) => 0,
+        Result::Err(error) => error.code(),
+    }
+}
+
+/// The vested amount at `now`, computed through 256-bit arithmetic.
+#[differential]
+#[gen(cliff = "0..=1_000_000", duration = "1..=1_000_000")]
+pub fn vested_amount(total: u64, start: u64, cliff: u64, duration: u64, now: u64) -> u64 {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => schedule.vested_at(now),
+        Result::Err(error) => error.code() as u64,
+    }
+}
