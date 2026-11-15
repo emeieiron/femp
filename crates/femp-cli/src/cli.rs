@@ -28,6 +28,8 @@ pub enum Command {
     Build(BuildArgs),
     /// Run tests on every platform and compare the outcomes
     Test(TestArgs),
+    /// Run property and differential tests with generated inputs on every platform
+    Prop(PropArgs),
     /// Build, then collect distributable packages under `dist/`
     Package(BuildArgs),
     /// Remove build and package output
@@ -83,6 +85,60 @@ pub struct TestArgs {
     /// Print the compiler's full output for every suite, not only failing ones
     #[arg(long)]
     pub verbose: bool,
+}
+
+#[derive(Args)]
+pub struct PropArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Only run entry points whose name contains this text
+    #[arg(short, long, value_name = "PATTERN")]
+    pub filter: Option<String>,
+
+    /// Optimization levels to compile every platform at, comma separated
+    #[arg(short = 'O', long, value_name = "LEVELS", value_delimiter = ',', default_value = "1", value_parser = parse_opt_level)]
+    pub optimize: Vec<OptLevel>,
+
+    /// Cases or machine runs per entry point, overriding their own settings
+    #[arg(long, value_name = "N")]
+    pub cases: Option<u32>,
+
+    /// Seed for generating cases, decimal or 0x hex; random when omitted
+    #[arg(long, value_name = "SEED", env = "FEMP_PROP_SEED")]
+    pub seed: Option<String>,
+
+    /// Enumerate every input of entry points whose domain is small enough
+    #[arg(long)]
+    pub exhaustive: bool,
+
+    /// Report failures as found, without minimizing them
+    #[arg(long)]
+    pub no_shrink: bool,
+
+    /// Most replays spent minimizing one failure
+    #[arg(long, value_name = "N", default_value_t = femp_prop::engine::DEFAULT_MAX_SHRINKS)]
+    pub max_shrinks: usize,
+
+    /// How targets must agree: normalized, strict or lenient
+    #[arg(long, value_name = "MODE", default_value = "normalized")]
+    pub compare: String,
+
+    /// Neither replay nor store regressions
+    #[arg(long)]
+    pub no_regressions: bool,
+
+    /// Seconds a single case may run before it counts as a timeout
+    #[arg(long, value_name = "SECONDS", default_value_t = 10)]
+    pub timeout: u64,
+
+    /// List the entry points instead of running them
+    #[arg(long)]
+    pub list: bool,
+
+    /// Also write the report as JSON to `build/prop/report.json`
+    #[arg(long)]
+    pub json: bool,
 }
 
 fn parse_opt_level(text: &str) -> Result<OptLevel, String> {

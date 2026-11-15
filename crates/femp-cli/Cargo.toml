@@ -16,8 +16,9 @@ femp-evm.workspace = true
 femp-native.workspace = true
 femp-wasm.workspace = true
 femp-testing.workspace = true
+femp-prop.workspace = true
 anyhow.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 serde_json.workspace = true
 
 tempfile.workspace = true

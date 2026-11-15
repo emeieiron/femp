@@ -1234,6 +1234,7 @@ dependencies = [
  "femp-core",
  "femp-evm",
  "femp-native",
+ "femp-prop",
  "femp-testing",
  "femp-toolchain",
  "femp-wasm",
