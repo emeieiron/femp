@@ -4,5 +4,6 @@ pub mod clean;
 pub mod doctor;
 pub mod new;
 pub mod package;
+pub mod prop;
 pub mod test;
 pub mod toolchain;
