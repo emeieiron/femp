@@ -1,0 +1,8 @@
+{
+  "name": "vesting-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "node e2e/run.mjs"
+  }
+}

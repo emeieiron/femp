@@ -1,0 +1,4 @@
+/// Every public function in this file is exported to JavaScript.
+pub fn fee(amount: u64, rate: u64) -> u64 {
+    {{ident}}_core::fee(amount, rate)
+}

@@ -1,0 +1,27 @@
+[package]
+name = "femp-cli"
+description = "Command-line interface for Fe Multiplatform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "femp"
+path = "src/main.rs"
+
+[dependencies]
+femp-core.workspace = true
+femp-toolchain.workspace = true
+femp-evm.workspace = true
+femp-native.workspace = true
+femp-wasm.workspace = true
+femp-testing.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

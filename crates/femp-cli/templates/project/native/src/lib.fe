@@ -1,0 +1,29 @@
+use core::text::parse_uint
+use std::env::Args
+use std::io::{Stderr, Stdout}
+use {{ident}}_core::fee
+
+const EXIT_USAGE: i32 = 64
+
+fn number(_ index: usize) -> Option<u64> uses (args: Args) {
+    if index >= args.count() {
+        return Option::None
+    }
+    match parse_uint(args.get(index)) {
+        Option::Some(value) => value.downcast(),
+        Option::None => Option::None,
+    }
+}
+
+pub fn main() -> i32 uses (args: Args, out: mut Stdout, err: mut Stderr) {
+    match (number(1), number(2)) {
+        (Option::Some(amount), Option::Some(rate)) => {
+            println!(fee(amount, rate))
+            0
+        },
+        _ => {
+            eprintln!("usage: {{name}} <amount> <rate in basis points>")
+            EXIT_USAGE
+        },
+    }
+}

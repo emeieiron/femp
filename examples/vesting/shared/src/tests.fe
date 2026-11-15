@@ -1,0 +1,152 @@
+use ingot::error::VestingError
+use ingot::ports::{Clock, claim_now, claimable_now}
+use ingot::position::Position
+use ingot::schedule::Schedule
+
+struct FixedClock { now: u64 }
+
+impl Clock for FixedClock {
+    fn now(self) -> u64 {
+        self.now
+    }
+}
+
+// Results are unwrapped by hand: `Result::unwrap` needs an error type that can
+// be encoded as revert data, which would tie these tests to one platform.
+fn valid_schedule(_ result: Result<VestingError, Schedule>) -> Schedule {
+    match result {
+        Result::Ok(schedule) => schedule,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+fn valid_position(_ result: Result<VestingError, Position>) -> Position {
+    match result {
+        Result::Ok(position) => position,
+        Result::Err(_) => core::panic(),
+    }
+}
+
+// 1000 tokens from t=100, nothing before t=150, everything by t=300.
+fn schedule() -> Schedule {
+    valid_schedule(
+        Schedule::new(total: 1000, start: 100, cliff: 50, duration: 200),
+    )
+}
+
+fn schedule_error(total: u64, start: u64, cliff: u64, duration: u64) -> u32 {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(_) => 0,
+        Result::Err(error) => error.code(),
+    }
+}
+
+fn claim_error(_ position: Position, amount: u64, now: u64) -> u32 {
+    match position.claim(amount, now) {
+        Result::Ok(_) => 0,
+        Result::Err(error) => error.code(),
+    }
+}
+
+#[test]
+fn nothing_vests_before_the_cliff() {
+    assert(schedule().vested_at(0) == 0)
+    assert(schedule().vested_at(149) == 0)
+}
+
+#[test]
+fn vesting_is_linear_after_the_cliff() {
+    assert(schedule().vested_at(150) == 250)
+    assert(schedule().vested_at(200) == 500)
+    assert(schedule().vested_at(299) == 995)
+}
+
+#[test]
+fn everything_vests_at_the_end() {
+    assert(schedule().vested_at(300) == 1000)
+    assert(schedule().vested_at(1000000) == 1000)
+}
+
+#[test]
+fn large_amounts_do_not_overflow() {
+    let big = valid_schedule(
+        Schedule::new(
+            total: 18000000000000000000,
+            start: 0,
+            cliff: 0,
+            duration: 4,
+        ),
+    )
+    assert(big.vested_at(3) == 13500000000000000000)
+}
+
+#[test]
+fn invalid_schedules_are_rejected() {
+    assert(
+        schedule_error(total: 0, start: 100, cliff: 50, duration: 200) == 1,
+    )
+    assert(
+        schedule_error(total: 1000, start: 100, cliff: 50, duration: 0) == 2,
+    )
+    assert(
+        schedule_error(total: 1000, start: 100, cliff: 201, duration: 200) == 3,
+    )
+    assert(
+        schedule_error(
+                total: 1000,
+                start: 18446744073709551615,
+                cliff: 0,
+                duration: 1,
+            ) == 4,
+    )
+    assert(
+        schedule_error(total: 1000, start: 100, cliff: 50, duration: 200) == 0,
+    )
+}
+
+#[test]
+fn claiming_advances_the_position() {
+    let opened = Position::open(schedule())
+    assert(opened.claimable_at(200) == 500)
+
+    let claimed = valid_position(opened.claim(amount: 200, now: 200))
+    assert(claimed.claimed == 200)
+    assert(claimed.claimable_at(200) == 300)
+    assert(claimed.claimable_at(300) == 800)
+}
+
+#[test]
+fn invalid_claims_are_rejected() {
+    let opened = Position::open(schedule())
+    assert(claim_error(opened, amount: 0, now: 200) == 5)
+    assert(claim_error(opened, amount: 501, now: 200) == 6)
+    assert(claim_error(opened, amount: 1, now: 149) == 6)
+    assert(claim_error(opened, amount: 500, now: 200) == 0)
+}
+
+#[test]
+fn restored_positions_are_validated() {
+    let restored = valid_position(Position::restore(schedule(), claimed: 600))
+    assert(restored.claimable_at(200) == 0)
+    assert(restored.claimable_at(300) == 400)
+
+    let code = match Position::restore(schedule(), claimed: 1001) {
+        Result::Ok(_) => 0,
+        Result::Err(error) => error.code(),
+    }
+    assert(code == 7)
+}
+
+#[test]
+fn the_clock_port_drives_time_dependent_logic() {
+    let opened = Position::open(schedule())
+    let claimable = with (Clock = FixedClock { now: 200 }) {
+        claimable_now(opened)
+    }
+    assert(claimable == 500)
+
+    let after = with (Clock = FixedClock { now: 300 }) {
+        claim_now(opened, amount: 1000)
+    }
+    assert(valid_position(after).claimed == 1000)
+}

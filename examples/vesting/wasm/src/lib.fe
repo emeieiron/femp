@@ -1,0 +1,87 @@
+use std::wasm::Abort
+use vesting_core::{Clock, Position, Schedule}
+
+struct HostTime { seconds: u64 }
+
+impl Clock for HostTime {
+    fn now(self) -> u64 {
+        self.seconds
+    }
+}
+
+// Invalid input ends the call by aborting with the shared error code, which
+// the host turns into an exception carrying that code.
+fn schedule_or_abort(total: u64, start: u64, cliff: u64, duration: u64) -> Schedule
+uses (host: mut Abort)
+{
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => schedule,
+        Result::Err(error) => host.abort(code: error.code()),
+    }
+}
+
+fn position_or_abort(total: u64, start: u64, cliff: u64, duration: u64, claimed: u64) -> Position
+uses (host: mut Abort)
+{
+    match Position::restore(
+        schedule_or_abort(total, start, cliff, duration),
+        claimed,
+    ) {
+        Result::Ok(position) => position,
+        Result::Err(error) => host.abort(code: error.code()),
+    }
+}
+
+/// Returns 0 for a valid schedule and the shared error code otherwise.
+pub fn validate(total: u64, start: u64, cliff: u64, duration: u64) -> u32 {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(_) => 0,
+        Result::Err(error) => error.code(),
+    }
+}
+
+pub fn vested_at(total: u64, start: u64, cliff: u64, duration: u64, now: u64) -> u64
+uses (host: mut Abort)
+{
+    schedule_or_abort(total, start, cliff, duration).vested_at(now)
+}
+
+pub fn claimable_at(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    claimed: u64,
+    now: u64,
+) -> u64
+uses (host: mut Abort)
+{
+    position_or_abort(total, start, cliff, duration, claimed).claimable_at(now)
+}
+
+pub fn claimable_now(total: u64, start: u64, cliff: u64, duration: u64, claimed: u64) -> u64
+uses (host: mut Abort, time: mut std::wasm::Clock)
+{
+    let position = position_or_abort(total, start, cliff, duration, claimed)
+    with (Clock = HostTime { seconds: time.now_ms() / 1000 }) {
+        vesting_core::claimable_now(position)
+    }
+}
+
+/// Returns the total claimed after claiming `amount` at `now`.
+pub fn claim(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    claimed: u64,
+    amount: u64,
+    now: u64,
+) -> u64
+uses (host: mut Abort)
+{
+    match position_or_abort(total, start, cliff, duration, claimed).claim(amount, now) {
+        Result::Ok(updated) => updated.claimed,
+        Result::Err(error) => host.abort(code: error.code()),
+    }
+}

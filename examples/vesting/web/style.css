@@ -1,0 +1,94 @@
+:root {
+  color-scheme: light dark;
+  --surface: light-dark(#f6f5f1, #17181a);
+  --panel: light-dark(#ffffff, #212326);
+  --ink: light-dark(#1c1d1f, #ecebe6);
+  --muted: light-dark(#63666b, #9a9da3);
+  --line: light-dark(#dcdad3, #36393e);
+  --accent: light-dark(#1f6f54, #62c8a1);
+  --danger: light-dark(#a5361f, #f08a72);
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+main {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 3rem 1rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+  letter-spacing: -0.01em;
+}
+
+.lede {
+  margin: 0 0 2rem;
+  color: var(--muted);
+}
+
+form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1rem;
+}
+
+label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+input {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--line);
+  border-radius: 0.375rem;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 2rem 0 0;
+}
+
+dl div {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+}
+
+dt {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  font-size: 1.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+#error {
+  margin: 1rem 0 0;
+  color: var(--danger);
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vesting calculator</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Vesting calculator</h1>
+      <p class="lede">
+        Runs the same Fe code as the contract and the command-line tool, compiled to WebAssembly.
+      </p>
+
+      <form id="schedule">
+        <label>Total <input name="total" inputmode="numeric" value="1000" /></label>
+        <label>Start <input name="start" inputmode="numeric" value="100" /></label>
+        <label>Cliff <input name="cliff" inputmode="numeric" value="50" /></label>
+        <label>Duration <input name="duration" inputmode="numeric" value="200" /></label>
+        <label>Already claimed <input name="claimed" inputmode="numeric" value="0" /></label>
+        <label>Now <input name="now" inputmode="numeric" value="200" /></label>
+      </form>
+
+      <dl id="result" aria-live="polite">
+        <div><dt>Vested</dt><dd id="vested">–</dd></div>
+        <div><dt>Claimable</dt><dd id="claimable">–</dd></div>
+      </dl>
+      <p id="error" role="alert" hidden></p>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

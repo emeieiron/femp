@@ -1,0 +1,14 @@
+PASS  [0.6070s] nested_passes
+FAIL  [0.6072s] fails
+    Test reverted: 0x4e487b710000000000000000000000000000000000000000000000000000000000000001
+stdout:
+
+stderr:
+
+PASS  [0.6079s] native_only
+PASS  [0.6180s] passes
+
+test result: FAILED. 3 passed; 1 failed
+
+failures:
+    fails

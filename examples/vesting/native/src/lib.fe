@@ -1,0 +1,141 @@
+use core::text::parse_uint
+use std::env::Args
+use std::io::{Stderr, Stdout}
+use vesting_core::{Clock, Position, Schedule, VestingError}
+
+const EXIT_USAGE: i32 = 64
+
+struct SystemClock { seconds: u64 }
+
+impl Clock for SystemClock {
+    fn now(self) -> u64 {
+        self.seconds
+    }
+}
+
+fn number(_ index: usize) -> Option<u64> uses (args: Args) {
+    if index >= args.count() {
+        return Option::None
+    }
+    match parse_uint(args.get(index)) {
+        Option::Some(value) => value.downcast(),
+        Option::None => Option::None,
+    }
+}
+
+fn usage() -> i32 uses (err: mut Stderr) {
+    eprintln!("usage:")
+    eprintln!(
+        "  vesting vested    <total> <start> <cliff> <duration> <now>",
+    )
+    eprintln!(
+        "  vesting claimable <total> <start> <cliff> <duration> <claimed> [now]",
+    )
+    eprintln!(
+        "  vesting claim     <total> <start> <cliff> <duration> <claimed> <amount> <now>",
+    )
+    EXIT_USAGE
+}
+
+// The exit status is the shared error code, so scripts can tell failures
+// apart the same way callers of the contract and the browser module do.
+fn fail(_ error: VestingError) -> i32 uses (err: mut Stderr) {
+    let code = error.code()
+    eprintln!("error ", code)
+    code.downcast_truncate()
+}
+
+fn schedule_from_args() -> Option<Result<VestingError, Schedule>>
+uses (args: Args)
+{
+    match (number(2), number(3), number(4), number(5)) {
+        (Option::Some(total), Option::Some(start), Option::Some(cliff), Option::Some(duration)) => {
+            Option::Some(Schedule::new(total, start, cliff, duration))
+        },
+        _ => Option::None,
+    }
+}
+
+fn vested(_ schedule: Schedule) -> i32
+uses (args: Args, out: mut Stdout, err: mut Stderr)
+{
+    match number(6) {
+        Option::Some(now) => {
+            println!(schedule.vested_at(now))
+            0
+        },
+        Option::None => usage(),
+    }
+}
+
+fn claimable(_ schedule: Schedule) -> i32
+uses (args: Args, out: mut Stdout, err: mut Stderr, time: std::time::Clock)
+{
+    match number(6) {
+        Option::Some(claimed) => {
+            let now = match number(7) {
+                Option::Some(now) => now,
+                Option::None => time.now().as_secs(),
+            }
+            match Position::restore(schedule, claimed) {
+                Result::Ok(position) => {
+                    let amount = with (Clock = SystemClock { seconds: now }) {
+                        vesting_core::claimable_now(position)
+                    }
+                    println!(amount)
+                    0
+                },
+                Result::Err(error) => fail(error),
+            }
+        },
+        Option::None => usage(),
+    }
+}
+
+fn claim(_ schedule: Schedule) -> i32
+uses (args: Args, out: mut Stdout, err: mut Stderr)
+{
+    match (number(6), number(7), number(8)) {
+        (Option::Some(claimed), Option::Some(amount), Option::Some(now)) => {
+            let claimed_total = match Position::restore(schedule, claimed) {
+                Result::Ok(position) => position.claim(amount, now),
+                Result::Err(error) => Result::Err(error),
+            }
+            match claimed_total {
+                Result::Ok(updated) => {
+                    println!(updated.claimed)
+                    0
+                },
+                Result::Err(error) => fail(error),
+            }
+        },
+        _ => usage(),
+    }
+}
+
+pub fn main() -> i32
+uses (args: Args, out: mut Stdout, err: mut Stderr, time: std::time::Clock)
+{
+    if args.count() < 2 {
+        return usage()
+    }
+    let schedule = match schedule_from_args() {
+        Option::Some(Result::Ok(schedule)) => schedule,
+        Option::Some(Result::Err(error)) => {
+            return fail(error)
+        },
+        Option::None => {
+            return usage()
+        },
+    }
+    let command = args.get(1)
+    if command == "vested" {
+        vested(schedule)
+    } else if command == "claimable" {
+        claimable(schedule)
+    } else if command == "claim" {
+        claim(schedule)
+    } else {
+        usage()
+    }
+}
