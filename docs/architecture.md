@@ -7,14 +7,15 @@ itself is always done by `fe`.
 ## Crates
 
 ```
-femp-cli ──────────────┬──────────────┬─────────────┐
-   │                   │              │             │
-femp-testing     femp-evm      femp-native     femp-wasm
-   │                   └──────┬───────┴─────────────┘
-   │                          │
-   │                   femp-toolchain
-   │                          │
-   └──────────────────── femp-core
+femp-cli ──────┬──────────────┬──────────────┬─────────────┐
+   │           │              │              │             │
+femp-testing  femp-prop   femp-evm      femp-native     femp-wasm
+   │           │              │              ├─────────────┤
+   │           │              │         femp-harness       │
+   │           │              └──────┬───────┴─────────────┘
+   │           │              femp-toolchain
+   │           │                     │
+   └───────────┴─────────────── femp-core
 ```
 
 | Crate | Responsibility | Depends on |
@@ -23,7 +24,12 @@ femp-testing     femp-evm      femp-native     femp-wasm
 | `femp-toolchain` | Finding the pinned compiler, building it from source, probing its backends and the host, running `fe check/build/test`, parsing test output. The only crate that knows the compiler's command line. | core |
 | `femp-evm`, `femp-native`, `femp-wasm` | One `Platform` implementation each: availability, build, bindings, packaging. | core, toolchain |
 | `femp-testing` | Planning which module runs on which platform, running the jobs, and the parity matrix. | core |
+| `femp-prop` | Property testing: discovering entry points in Fe sources, generators and choice tapes, the engine, shrinking, comparison, regressions and reports. No process spawning, no platform knowledge. | core |
+| `femp-harness` | Child processes that answer a line protocol, for harnesses that run as processes (native, and WebAssembly through Node.js). | core |
 | `femp-cli` | Argument parsing, the session (project + registry + environment), commands, console output, project templates. `registry.rs` is the only file that names concrete platforms. | all |
+
+`femp-core::property` holds the data the engine and the adapters share: primitive types and
+values, normalized outcomes, suites of entry points, and the `Executor` trait.
 
 ## The platform extension point
 
@@ -41,6 +47,7 @@ pub trait Platform {
     fn test(&self, cx: &Context<'_>, module: &Module, filter: Option<&str>) -> Result<TestRun>;
     fn bindings(&self, cx: &Context<'_>, module: &Module, built: &[Artifact], kinds: &[String], out_dir: &Path) -> Result<Vec<Artifact>>;
     fn package(&self, cx: &Context<'_>, module: &Module, built: &[Artifact], dist_dir: &Path) -> Result<Vec<Artifact>>;
+    fn property_harness(&self, cx: &Context<'_>, request: &HarnessRequest<'_>) -> Result<Box<dyn Executor>>;
 }
 ```
 
@@ -67,6 +74,7 @@ backends degrade gracefully.
 | `build` | For each platform module: the adapter's `build`, then `bindings`. |
 | `test` | For each platform: `fe test --backend <b>` on every shared module and the platform's own modules; results feed the parity matrix. |
 | `package` | `build`, then each adapter's `package`, then `dist/manifest.json`. |
+| `prop` | Discovery in the Fe sources, then for each module with entry points and each target (platform × optimization level) the adapter's `property_harness`: render, `fe build`, start an executor. The engine then drives every executor. |
 
 One `fe` invocation compiles for one target, and a workspace whose members set different targets
 is rejected by the compiler. Driving the compiler once per module and platform is what lets a
@@ -96,6 +104,28 @@ contract: it verifies the module against the manifest (versions, SHA-256, import
 supplies the `env` imports (log, clock, abort, read-only files), places text arguments in the
 module's memory for the duration of a call, and converts values by their Fe types.
 
+## Property testing
+
+`femp prop` is described for users in [property-testing.md](property-testing.md). Internally:
+
+1. **Discovery** (`femp-prop/src/discover`) tokenizes each module's sources and reads the
+   attributes and signatures of entry points. It does not resolve names. The harness calls each
+   entry point by its path, so the compiler checks anything discovery reads wrongly.
+2. **Generation** (`cases`, `generators`, `choices`): every case is a function of a tape of
+   bounded choices. Random generation records the tape, exhaustive runs construct it, and
+   regressions store it.
+3. **Execution** (`engine`): each batch of cases goes to every executor in parallel, one
+   thread per target. Each case is judged by a pluggable `Comparator` (`verdict`).
+4. **Shrinking** (`shrink`) edits the failing tape with independent `ShrinkPass`es and keeps
+   only simpler tapes that still fail the same way.
+5. **Results** (`regress`, `report`): failures are written to `regressions/`, and the report is
+   rendered as text or JSON.
+
+The harnesses differ per platform but share one shape. A property is a typed call. A machine
+run is a sequence executed from a fresh state that returns one record per step: on the EVM
+through transactions against storage, in one native process reading standard input, and in
+one WebAssembly call that reads the sequence from a host file.
+
 ## Toolchain
 
 `femp-toolchain` resolves the compiler in this order: `FEMP_FE`, the managed toolchain for the
@@ -118,3 +148,7 @@ that is new enough.
 - `crates/femp-cli/tests` drives the `femp` binary against the demonstrator when the compiler is
   installed.
 - `examples/vesting/e2e` runs one table of cases against the three built artifacts.
+- `femp-prop` tests the engine against in-memory executors. Each harness renderer is tested
+  against a committed fixture, and the revm executor runs committed harness bytecode.
+  `crates/femp-cli/tests/properties.rs` runs `femp prop` on a fixture whose properties fail on
+  purpose (`tests/fixtures/planted`) and checks the exact minimal counterexamples.
