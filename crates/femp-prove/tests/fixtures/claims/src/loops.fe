@@ -73,3 +73,17 @@ pub fn counts_to_zero(n: u8) -> bool {
 pub fn keeps_a_wrong_invariant(n: u8) -> bool {
     count_with_wrong_invariant(n) == n
 }
+
+pub fn total(_ xs: [u8; 8]) -> u64 {
+    var sum: u64 = 0
+    for x in xs {
+        sum = sum + (x as u64)
+    }
+    sum
+}
+
+/// Holds by unrolling exactly the default eight iterations.
+#[property]
+pub fn total_of_eight_is_bounded(a: u8, b: u8) -> bool {
+    total([a, b, a, b, a, b, a, b]) <= 2040
+}

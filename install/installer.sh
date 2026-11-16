@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installs femp with everything it needs: the femp binary, the Fe compiler it
-# drives, Node.js (for WebAssembly) when no Node.js 20 or newer is found, and
-# a C compiler (for native executables) when none is found.
+# drives, the Z3 solver `femp prove` uses, Node.js (for WebAssembly) when no
+# Node.js 20 or newer is found, and a C compiler (for native executables)
+# when none is found.
 #
 #   curl -fsSL https://github.com/emeieiron/femp/releases/latest/download/installer.sh | sh
 #
@@ -157,12 +158,31 @@ install_femp() {
         cp -R "$toolchain" "$FEMP_HOME/toolchains/"
     done
     cp "$unpacked"/LICENSE* "$FEMP_HOME/licenses/" 2>/dev/null || true
+    install_z3
     # Replaced last, so that a failed install leaves a working femp alone.
     cp "$unpacked/bin/femp" "$FEMP_HOME/bin/femp.new"
     mv "$FEMP_HOME/bin/femp.new" "$FEMP_HOME/bin/femp"
 
     "$FEMP_HOME/bin/femp" --version >/dev/null 2>&1 \
         || fail "the installed femp does not run on this system"
+}
+
+# The archive carries a Z3 build for this kind of system. A system too old
+# for it keeps working with a `z3` on PATH, which femp falls back to.
+install_z3() {
+    if [ ! -d "$unpacked/z3" ]; then
+        z3_status="not in this release"
+        return
+    fi
+    rm -rf "$FEMP_HOME/z3"
+    cp -R "$unpacked/z3" "$FEMP_HOME/z3"
+    if bundled=$("$FEMP_HOME/z3/bin/z3" --version 2>/dev/null); then
+        z3_status="$bundled ($FEMP_HOME/z3)"
+    elif has z3; then
+        z3_status="$(z3 --version) ($(command -v z3)); the bundled Z3 needs a newer system"
+    else
+        z3_status="not usable: the bundled Z3 needs a newer system; install z3 for \`femp prove\`"
+    fi
 }
 
 node_major() {
@@ -334,7 +354,7 @@ modify_path() {
 
 usage() {
     cat <<'USAGE'
-Installs femp, the Fe compiler, and Node.js and a C compiler when missing.
+Installs femp, the Fe compiler and Z3, and Node.js and a C compiler when missing.
 
 Usage: installer.sh [--yes] [--no-modify-path] [--skip-deps]
 
@@ -380,6 +400,7 @@ main() {
     version=$("$FEMP_HOME/bin/femp" --version)
     say ""
     say "$version is installed in $FEMP_HOME"
+    say "  z3    $z3_status"
     say "  node  $node_status"
     say "  cc    $cc_status"
     say ""

@@ -27,6 +27,8 @@ startup files. It sets up:
 - **femp.**
 - **The Fe 26.6.0 compiler** built with the EVM, native and WebAssembly backends. Released Fe
   binaries lack the WebAssembly backend, so femp ships its own build.
+- **Z3**, the solver `femp prove` uses, in `~/.femp/z3`. Its Linux builds need glibc 2.38 or
+  newer; on older systems femp uses a `z3` from the system's package manager instead.
 - **Node.js**, for WebAssembly, when no Node.js 20 or newer is on `PATH`. It is kept in
   `~/.femp/node` for femp alone and does not change which `node` other programs see.
 - **A C compiler**, for native executables, when none is found:
@@ -62,13 +64,14 @@ femp new my-app && cd my-app
 femp doctor
 femp test
 femp prop
+femp prove
 femp build
 ```
 
 ### Building from source
 
 Building from source needs Rust 1.96 or newer for femp, Rust 1.97 or newer and npm for the Fe
-compiler, Node.js 20 or newer, and a C compiler. femp links the Fe compiler's own crates for
+compiler, Node.js 20 or newer, a C compiler, and Z3 for `femp prove`. femp links the Fe compiler's own crates for
 `femp prove`; Cargo fetches them from the Fe repository at the pinned release, so the first
 build takes a few minutes longer.
 
@@ -79,7 +82,7 @@ femp toolchain install                 # builds Fe 26.6.0 with all three backend
 
 `femp toolchain install` compiles Fe from source into `~/.femp/toolchains/` (override with
 `FEMP_HOME`). To use a compiler you built yourself, point `FEMP_FE` at it; to use a particular
-Node.js, point `FEMP_NODE` at it.
+Node.js, point `FEMP_NODE` at it, and a particular Z3, `FEMP_Z3`.
 
 ## Commands
 
@@ -93,6 +96,7 @@ Node.js, point `FEMP_NODE` at it.
 | `femp build [-t <platform>] [-O <level>]` | Compiles platform modules into `build/` and generates bindings. |
 | `femp test [-t <platform>] [-f <pattern>]` | Runs shared tests on every platform and compares the outcomes. |
 | `femp prop [-t <platform>] [-f <pattern>] [--seed <n>]` | Runs properties, differentials and state machines with generated inputs on every platform, and minimizes failures. |
+| `femp prove [-t <platform>] [-f <pattern>]` | Proves the same claims, and `#[spec]` functions, for all inputs, and replays counterexamples on every platform. |
 | `femp package` | Builds, then collects distributable packages and a hash index under `dist/`. |
 | `femp clean` | Removes `build/` and `dist/`. |
 
@@ -169,6 +173,36 @@ FAIL  core::rounding  diverges across targets after 2 cases
 See [docs/property-testing.md](docs/property-testing.md) for generators, machines, comparison
 modes and options.
 
+## Proving
+
+`femp prove` proves the same declarations for all inputs with the Z3 solver, and `#[spec]`
+functions state what a function promises:
+
+```fe
+#[spec(transparent, target = "Schedule::vested_at")]
+fn vested_at_spec(schedule: Schedule, now: u64) -> u64 {
+    requires(schedule.cliff <= schedule.duration)
+    let vested = schedule.vested_at(now)
+    ensures(vested <= schedule.total)
+    vested
+}
+```
+
+A property is proved when it returns `true` for every input in its domains without panicking,
+a machine by induction over its commands, and a differential when every target computes the
+same outcome. A counterexample is minimized, run on every platform, and saved under
+`regressions/`, so `femp prop` keeps replaying it:
+
+```
+PROVED      core::vested_never_exceeds_total  on evm, native, wasm
+REFUTED     core::halves_stay_small           returns false
+            x = 250
+            evm returned false · native returned false · wasm returned false
+            saved to regressions/core/halves_stay_small.json
+```
+
+See [docs/proving.md](docs/proving.md) for specs, loops, verdicts and limits.
+
 ## Repository
 
 | Path | Contents |
@@ -177,13 +211,18 @@ modes and options.
 | `crates/femp-toolchain` | Locating, installing and invoking the Fe compiler. |
 | `crates/femp-evm`, `femp-native`, `femp-wasm` | One adapter per platform. |
 | `crates/femp-testing` | Cross-platform test runs and the parity matrix. |
-| `crates/femp-prop` | Property testing: discovery, generators, the engine, shrinking, regressions, reports. |
+| `crates/femp-spec` | The claims both tools read: discovery, `#[gen]` domains, counterexamples. |
+| `crates/femp-prop` | Property testing: generators, the engine, shrinking, regressions, reports. |
+| `crates/femp-frontend` | Lowers Fe code into the prover's IR with the Fe compiler's own crates. |
+| `crates/femp-vir` | The verification IR. |
+| `crates/femp-prove` | Proving: tasks, passes, verification conditions, the solver, verdicts, reports. |
 | `crates/femp-harness` | Line-protocol sessions with harnesses that run as processes. |
 | `crates/femp-cli` | The `femp` binary and the templates for `femp new`. |
 | `runtime/wasm-host` | The JavaScript host runtime shipped with WebAssembly bindings, and the property-harness runner. |
+| `ingots/spec` | The `femp_spec` library of `#[spec]` statements, which `femp new` copies into projects. |
 | `examples/vesting` | The demonstrator project. |
 | `install/` | The installer and the script that builds release archives (`.github/workflows/release.yml` runs it). |
-| `docs/` | [Architecture](docs/architecture.md), [project layout](docs/project-layout.md), [property testing](docs/property-testing.md), [adding a platform](docs/adding-a-platform.md). |
+| `docs/` | [Architecture](docs/architecture.md), [project layout](docs/project-layout.md), [property testing](docs/property-testing.md), [proving](docs/proving.md), [adding a platform](docs/adding-a-platform.md). |
 
 ## Development
 
@@ -193,14 +232,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 node --test runtime/wasm-host/*.test.js
 ```
 
-Tests that need the Fe compiler skip themselves when it is not installed.
+Tests that need the Fe compiler or Z3 skip themselves when they are not installed.
 
 ## Releasing
 
 Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`. The workflow:
 
-1. builds an archive per host with `install/build-archive.sh`, containing femp and the Fe
-   compiler;
+1. builds an archive per host with `install/build-archive.sh`, containing femp, the Fe
+   compiler and a pinned Z3 build;
 2. installs each archive with the installer as a smoke test;
 3. publishes the archives, `installer.sh` and `SHA256SUMS` as a GitHub release.
 
@@ -210,4 +249,4 @@ The installer URL always points at the latest release.
 
 femp is licensed under the [Apache License, Version 2.0](LICENSE). Release archives also
 contain the Fe compiler, which is licensed under the Apache License, Version 2.0 as well
-(`LICENSE-fe`).
+(`LICENSE-fe`), and Z3, which is licensed under the MIT License (`LICENSE-z3`).

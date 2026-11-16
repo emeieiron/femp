@@ -1,4 +1,4 @@
-use femp_core::property::{Outcome, PropertyKind, Trace, Value};
+use femp_core::property::{Outcome, PanicKind, PropertyKind, Trace, Value};
 
 use crate::compare::{Comparator, group, traces_equivalent};
 
@@ -25,6 +25,19 @@ impl Failure {
     }
 }
 
+/// What `femp_spec::requires` reports when it rejects a case.
+pub const REJECTION: &str = "femp_spec: requires";
+
+/// Whether every target rejected the case through a spec's `requires`, so
+/// it does not count.
+pub fn rejected(kind: PropertyKind, outcomes: &[Outcome]) -> bool {
+    kind == PropertyKind::Spec
+        && !outcomes.is_empty()
+        && outcomes.iter().all(|outcome| {
+            matches!(outcome, Outcome::Panicked(PanicKind::Message(message)) if message == REJECTION)
+        })
+}
+
 /// Judges one case from the outcome on each target. Divergence comes first:
 /// it is the more specific finding when targets also violate the property.
 pub fn judge_property(
@@ -44,6 +57,12 @@ pub fn judge_property(
             PropertyKind::Holds => **outcome != holds,
             // Agreeing on a panic is behavior worth keeping; a trap is not.
             PropertyKind::Agrees => matches!(outcome, Outcome::Trapped(_)),
+            // A spec returns what its target does; a failed `ensures` or any
+            // other panic fails it, and a rejection is not judged here.
+            PropertyKind::Spec => {
+                outcome.is_abnormal()
+                    && !rejected(PropertyKind::Spec, std::slice::from_ref(outcome))
+            }
         })
         .map(|(index, _)| index)
         .collect();
@@ -100,6 +119,25 @@ mod tests {
             Some(Failure::Diverged {
                 groups: vec![vec![0, 2], vec![1]]
             })
+        );
+    }
+
+    #[test]
+    fn specs_discard_rejected_cases() {
+        let rejection = Outcome::Panicked(PanicKind::Message(REJECTION.to_string()));
+        let both = [rejection.clone(), rejection.clone()];
+        assert!(rejected(PropertyKind::Spec, &both));
+        assert_eq!(judge_property(PropertyKind::Spec, &both, &Normalized), None);
+        let ensures = [
+            Outcome::Panicked(PanicKind::Assertion),
+            Outcome::Panicked(PanicKind::Assertion),
+        ];
+        assert!(!rejected(PropertyKind::Spec, &ensures));
+        assert!(judge_property(PropertyKind::Spec, &ensures, &Normalized).is_some());
+        let returned = [holds(true), holds(true)];
+        assert_eq!(
+            judge_property(PropertyKind::Spec, &returned, &Normalized),
+            None
         );
     }
 

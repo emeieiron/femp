@@ -156,7 +156,7 @@ pub struct ProveArgs {
     #[arg(long, value_name = "SECONDS", default_value_t = 20)]
     pub timeout: u64,
 
-    /// Times a loop without an `invariant(..)` is unrolled
+    /// Iterations a loop without an `invariant(..)` is unrolled for
     #[arg(long, value_name = "N", default_value_t = 8)]
     pub unroll: u32,
 

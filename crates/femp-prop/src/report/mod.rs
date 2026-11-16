@@ -32,6 +32,7 @@ pub enum EntryKind {
     Property,
     Differential,
     Machine,
+    Spec,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,12 +47,19 @@ pub struct EntryReport {
     pub skipped: Vec<Skip>,
     /// Cases (or machine runs) executed, regressions included.
     pub cases: usize,
+    /// Cases a spec's `requires` rejected, among `cases`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rejected: usize,
     pub regressions: usize,
     pub exhaustive: bool,
     /// Things worth knowing that do not fail the run, such as stored
     /// regressions that no longer match the declaration.
     pub notes: Vec<String>,
     pub status: Status,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 impl EntryReport {

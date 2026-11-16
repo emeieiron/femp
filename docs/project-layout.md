@@ -49,6 +49,14 @@ target = "wasm"
 vesting_core = "../shared"
 ```
 
+A dependency need not be a module. `femp new` puts the `femp_spec` library, whose statements
+`#[spec]` functions use, in `spec/`, and the shared module depends on it by path:
+
+```toml
+[dependencies]
+femp_spec = "../spec"
+```
+
 ## Generated source
 
 A module can declare a named generator in `femp.toml`.

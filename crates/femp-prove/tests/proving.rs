@@ -143,7 +143,10 @@ fn proves_and_refutes_the_fixture() {
                     assert_eq!(shown, ["-128", "-1"]);
                 }
                 (
-                    "counts_to_n" | "counts_a_few" | "largest_bounds_every_element",
+                    "counts_to_n"
+                    | "counts_a_few"
+                    | "largest_bounds_every_element"
+                    | "total_of_eight_is_bounded",
                     Verdict::Proved,
                 ) => {}
                 ("counts_many", Verdict::Refuted(refutation)) => {

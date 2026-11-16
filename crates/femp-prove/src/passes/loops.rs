@@ -36,7 +36,9 @@ impl Pass for Loops {
         while let Some(found) = innermost(function)? {
             let invariants = invariants(function, &found);
             if invariants.is_empty() {
-                unroll(function, &found, self.unroll.max(1));
+                // One copy more than iterations: the last copy's head may
+                // still leave the loop, and only its back edge is too far.
+                unroll(function, &found, self.unroll.max(1) + 1);
             } else {
                 cut(function, &found, &invariants)?;
             }

@@ -15,10 +15,10 @@ pub fn fee(amount: u64, rate: u64) -> u64 {
     scaled.downcast_unchecked()
 }
 
-/// What `fee` promises for every input, which `femp prove` proves: it never
-/// charges more than the amount.
+/// What `fee` promises for every input: it never charges more than the
+/// amount. `femp prove` proves it; `femp prop` also runs it, being public.
 #[spec]
-fn fee_spec(amount: u64, rate: u64) -> u64 {
+pub fn fee_spec(amount: u64, rate: u64) -> u64 {
     let charged = fee(amount, rate)
     ensures(charged <= amount)
     charged

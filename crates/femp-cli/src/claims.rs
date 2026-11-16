@@ -70,30 +70,27 @@ fn relativize(claims: &mut Claims, root: &Path) {
     }
 }
 
-pub fn list(found: &[(&Module, Claims)], specs: bool) {
+/// Lists every claim: properties and differentials, machines, then specs.
+/// Property testing lists the specs it can run; proving lists them all.
+pub fn list(found: &[(&Module, Claims)], all_specs: bool) {
     for (module, claims) in found {
+        let line = |name: &str, kind: &str, location: &dyn std::fmt::Display| {
+            console::line(format!("{}::{name}  {kind}  {location}", module.name));
+        };
         for property in &claims.suite.properties {
             let kind = match property.kind {
                 PropertyKind::Holds => "property",
                 PropertyKind::Agrees => "differential",
+                PropertyKind::Spec => continue,
             };
-            console::line(format!(
-                "{}::{}  {kind}  {}",
-                module.name, property.name, property.location
-            ));
+            line(&property.name, kind, &property.location);
         }
         for machine in &claims.suite.machines {
-            console::line(format!(
-                "{}::{}  machine  {}",
-                module.name, machine.name, machine.location
-            ));
+            line(&machine.name, "machine", &machine.location);
         }
-        if specs {
-            for contract in &claims.contracts {
-                console::line(format!(
-                    "{}::{}  spec  {}",
-                    module.name, contract.name, contract.location
-                ));
+        for contract in &claims.contracts {
+            if all_specs || contract.runnable().is_some() {
+                line(&contract.name, "spec", &contract.location);
             }
         }
     }

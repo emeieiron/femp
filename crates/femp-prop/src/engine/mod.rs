@@ -91,6 +91,7 @@ fn report(suite: &Suite, name: &str, kind: EntryKind, location: String) -> Entry
         ran_on: Vec::new(),
         skipped: Vec::new(),
         cases: 0,
+        rejected: 0,
         regressions: 0,
         exhaustive: false,
         notes: Vec::new(),

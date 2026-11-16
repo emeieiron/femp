@@ -234,7 +234,10 @@ fn contract_status(
             args_counterexample(refutation),
             done.targets.clone(),
         );
-        return (Some(status), None);
+        let replay = contract
+            .runnable()
+            .map(|_| ReplayCase::Args(refutation.values.clone()));
+        return (Some(status), replay);
     }
     let unsupported = done(plan).any(|done| matches!(done.verdict, Verdict::NotSupported(_)));
     if contract.mode == femp_spec::ContractMode::Trusted && !unsupported {

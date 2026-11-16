@@ -9,9 +9,10 @@ A token vesting library written once and used from three places.
 | `cli` | `native/` | A calculator: `vested`, `claimable`, `claim`. Exits with the error code on failure. |
 | `web` | `wasm/` | The same calculations exported to JavaScript; `web/` is a page that uses them. |
 
-The shared module also declares property tests (`shared/src/properties.fe`) and a state
-machine (`shared/src/model.fe`), and the contract module declares a machine that drives the
-deployed contract (`evm/src/machines.fe`).
+The shared module also declares property tests (`shared/src/properties.fe`), a state
+machine (`shared/src/model.fe`) and specs (`shared/src/specs.fe`), and the contract module
+declares a machine that drives the deployed contract (`evm/src/machines.fe`). `spec/` holds
+the `femp_spec` library the specs use.
 
 Amounts and timestamps are `u64`, the widest integer that crosses the WebAssembly boundary. The
 contract accounts for vesting only; it does not move tokens.
@@ -89,3 +90,30 @@ PASS  core::VestingModel                    100 runs on evm, native, wasm
 
 A failure is minimized and saved under `regressions/`, which is replayed first on later runs;
 commit it to keep the case. See [property testing](../../docs/property-testing.md).
+
+## Proved for all inputs
+
+`femp prove` proves the same entry points for every input, together with two specs in
+`shared/src/specs.fe`:
+
+| Spec | What it states |
+| --- | --- |
+| `vested_at_spec` | Nothing vests before the cliff, everything vests at the end, and never more than the total. It is `transparent`: callers keep `vested_at`'s body, because they also rely on vesting growing over time, which the spec does not state. |
+| `claim_spec` | A successful claim adds exactly the amount claimed, keeps the schedule, and never passes what has vested. Proofs of `VestingModel` and `claims_stay_within_what_vested` use it in place of `Position::claim`. |
+
+`VestingModel` is proved by induction. Its `schedule_stays_valid` invariant records what
+`Schedule::new` checks, which keeps `vested_at` from overflowing on any state the invariants
+allow, and `wait` stops the clock at the end of `u64` instead of overflowing.
+
+```
+PROVED      core::vested_never_exceeds_total      on evm, native, wasm
+...
+PROVED      core::VestingModel                    on evm, native, wasm
+PROVED      core::vested_at_spec                  on evm, native, wasm
+PROVED      core::claim_spec                      on evm, native, wasm
+
+10 proved, 0 refuted, 0 unknown, 1 not supported (evm, native, wasm)
+```
+
+`VestingContractMachine` drives the deployed contract through effects, which the prover does
+not model yet. See [proving](../../docs/proving.md).

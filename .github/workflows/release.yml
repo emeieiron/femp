@@ -1,5 +1,6 @@
-# Builds femp and the Fe compiler for every supported host and publishes them,
-# with the installer, as a GitHub release. Runs when a `v*` tag is pushed.
+# Builds femp and the Fe compiler for every supported host, packs them with a
+# pinned Z3 build, and publishes them, with the installer, as a GitHub
+# release. Runs when a `v*` tag is pushed.
 name: Release
 
 on:
@@ -15,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  # Building Fe needs Rust 1.97 or newer.
+  # Building Fe needs Rust 1.97 or newer; femp needs 1.96.
   RUST_TOOLCHAIN: "1.98.0"
   TAG: ${{ inputs.tag || github.ref_name }}
 

@@ -40,6 +40,9 @@ pub enum PropertyKind {
     Holds,
     /// `#[differential]`: any primitive result, which every target must agree on.
     Agrees,
+    /// A `#[spec]` function: a case its `requires` rejects is discarded;
+    /// otherwise it must return without panicking on every target.
+    Spec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
