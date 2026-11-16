@@ -19,6 +19,11 @@ pub struct Input<'a> {
     pub domain: &'a Domain,
 }
 
+/// The longest one probe for a smaller value may take. A probe the solver
+/// cannot decide in time counts as impossible, so a hard model is minimized
+/// less rather than slowly.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Fixes each input to its simplest value that still breaks the claim,
 /// leaving those equalities asserted. The solver must be in a satisfiable
 /// state; the caller pops what this pushes.
@@ -27,6 +32,7 @@ pub fn minimize(
     inputs: &[Input<'_>],
     timeout: Duration,
 ) -> Result<Vec<Value>, String> {
+    let probe = timeout.min(PROBE_TIMEOUT);
     let mut chosen = Vec::new();
     for input in inputs {
         // A nested check discards the model, so ask for one again.
@@ -37,13 +43,13 @@ pub fn minimize(
         let value = match input.domain {
             Domain::Const(value) => *value,
             Domain::OneOf(values) => {
-                first_possible(solver, input, values, timeout)?.unwrap_or(current)
+                first_possible(solver, input, values, probe)?.unwrap_or(current)
             }
             _ if input.ty == Ty::Bool => {
                 let options = [Value::boolean(false), Value::boolean(true)];
-                first_possible(solver, input, &options, timeout)?.unwrap_or(current)
+                first_possible(solver, input, &options, probe)?.unwrap_or(current)
             }
-            domain => nearest_to_origin(solver, input, domain, current, timeout)?,
+            domain => nearest_to_origin(solver, input, domain, current, probe)?,
         };
         solver.assert(&format!("(= {} {})", input.term, ints::value(&value)))?;
         chosen.push(value);

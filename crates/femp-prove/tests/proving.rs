@@ -116,6 +116,7 @@ fn proves_and_refutes_the_fixture() {
     let config = Config {
         solver,
         timeout: Duration::from_secs(20),
+        search_budget: Duration::from_secs(60),
     };
     for target in ["evm", "native", "wasm"] {
         for (declared, task) in tasks(target) {

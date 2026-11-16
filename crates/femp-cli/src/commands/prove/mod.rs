@@ -23,6 +23,8 @@ use crate::session::Session;
 
 const PROVE_DIR: &str = "prove";
 const REPORT_FILE: &str = "report.json";
+/// A machine's search may take this many query timeouts in all.
+const SEARCH_BUDGET_TIMEOUTS: u64 = 6;
 /// Seconds one replayed counterexample may run on a target.
 const REPLAY_TIMEOUT: u64 = 10;
 
@@ -61,8 +63,9 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
         out_dir: out_dir.clone(),
         dump_vir: args.dump_vir,
         keep_smt: args.keep_smt,
+        steps: args.steps as usize,
     };
-    let mut plans = Vec::new();
+    let mut plans: Vec<Vec<plan::ClaimPlan>> = Vec::new();
     for (module, claims) in &found {
         let mut module_plans = plan::skeletons(module, claims);
         for platform in platforms
@@ -79,25 +82,39 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
                 &options,
             )?;
         }
-        plans.extend(module_plans);
+        plan::compare_sides(&mut module_plans, claims, &options);
+        plans.push(module_plans);
     }
 
     let config = Config {
         solver,
         timeout: Duration::from_secs(args.timeout.max(1)),
+        search_budget: Duration::from_secs((args.timeout * SEARCH_BUDGET_TIMEOUTS).max(60)),
     };
     let jobs = args
         .jobs
         .unwrap_or_else(|| thread::available_parallelism().map_or(1, |count| count.get()));
-    schedule::run(&mut plans, &config, jobs, &|label| {
-        console::step("Checked", label);
-    });
+    let on_done = |label: &str| console::step("Checked", label);
+    for module_plans in &mut plans {
+        schedule::run(module_plans, &config, jobs, &on_done);
+    }
+    // Machines whose induction failed look for a real sequence.
+    for ((_, claims), module_plans) in found.iter().zip(&mut plans) {
+        plan::add_searches(module_plans, claims, &options);
+        schedule::run(module_plans, &config, jobs, &on_done);
+    }
 
     let places = aggregate::Places::new(project);
-    let (mut claims, refutations): (Vec<_>, Vec<_>) = plans
-        .iter()
-        .map(|plan| aggregate::report(plan, &places))
-        .unzip();
+    let mut claims = Vec::new();
+    let mut cases = Vec::new();
+    for ((_, module_claims), module_plans) in found.iter().zip(&plans) {
+        for plan in module_plans {
+            let (report, case) = aggregate::report(plan, module_claims, &places);
+            claims.push(report);
+            cases.push(case);
+        }
+    }
+    let flat: Vec<&plan::ClaimPlan> = plans.iter().flatten().collect();
     if !args.no_replay {
         let replayer = replay::Replayer {
             inputs: &inputs,
@@ -108,14 +125,14 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
         for (module, module_claims) in &found {
             let pending: Vec<replay::Found<'_>> = claims
                 .iter_mut()
-                .zip(&plans)
-                .zip(&refutations)
+                .zip(&flat)
+                .zip(&cases)
                 .filter(|((_, plan), _)| plan.module == module.name)
-                .filter_map(|((report, plan), refutation)| {
+                .filter_map(|((report, plan), case)| {
                     Some(replay::Found {
                         plan,
                         report,
-                        refutation: refutation.clone()?,
+                        case: case.clone()?,
                     })
                 })
                 .collect();
@@ -137,5 +154,6 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
         write_file(&path, format!("{json}\n"))?;
         console::step("Wrote", &console::relative(&path, &project.root));
     }
-    Ok(report.succeeded(args.strict))
+    let disagreed = report.claims.iter().any(replay::Replayer::disagrees);
+    Ok(report.succeeded(args.strict) && !disagreed)
 }

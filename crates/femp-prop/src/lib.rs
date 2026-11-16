@@ -6,6 +6,7 @@
 pub mod cases;
 pub mod choices;
 pub mod compare;
+pub mod describe;
 pub mod engine;
 pub mod generators;
 pub mod regress;

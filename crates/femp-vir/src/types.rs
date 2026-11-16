@@ -34,6 +34,22 @@ impl Type {
         Self::Int { bits, signed: true }
     }
 
+    /// The same type with every table reference moved by `offset`, for a
+    /// type taken from a table appended to another.
+    pub fn shifted(&self, offset: u32) -> Self {
+        match self {
+            Self::Adt(id) => Self::Adt(TypeId(id.0 + offset)),
+            Self::Tuple(items) => {
+                Self::Tuple(items.iter().map(|item| item.shifted(offset)).collect())
+            }
+            Self::Array { elem, len } => Self::Array {
+                elem: Box::new(elem.shifted(offset)),
+                len: *len,
+            },
+            Self::Bool | Self::Int { .. } | Self::Unit => self.clone(),
+        }
+    }
+
     pub fn is_int(&self) -> bool {
         matches!(self, Self::Int { .. })
     }
@@ -93,6 +109,37 @@ impl TypeTable {
     pub fn push(&mut self, def: TypeDef) -> TypeId {
         self.defs.push(def);
         TypeId(self.defs.len() as u32 - 1)
+    }
+
+    /// Appends the definitions of `other`, returning the offset their ids
+    /// moved by.
+    pub fn append(&mut self, other: &TypeTable) -> u32 {
+        let offset = self.defs.len() as u32;
+        for def in &other.defs {
+            self.defs.push(match def {
+                TypeDef::Struct { name, fields } => TypeDef::Struct {
+                    name: name.clone(),
+                    fields: fields
+                        .iter()
+                        .map(|field| Field {
+                            name: field.name.clone(),
+                            ty: field.ty.shifted(offset),
+                        })
+                        .collect(),
+                },
+                TypeDef::Enum { name, variants } => TypeDef::Enum {
+                    name: name.clone(),
+                    variants: variants
+                        .iter()
+                        .map(|variant| Variant {
+                            name: variant.name.clone(),
+                            fields: variant.fields.iter().map(|ty| ty.shifted(offset)).collect(),
+                        })
+                        .collect(),
+                },
+            });
+        }
+        offset
     }
 
     pub fn ids(&self) -> impl Iterator<Item = TypeId> {

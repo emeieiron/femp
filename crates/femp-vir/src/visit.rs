@@ -179,6 +179,33 @@ impl Function {
         }
     }
 
+    /// Moves every type reference by `offset`, after the function's type
+    /// table was appended to another.
+    pub fn shift_types(&mut self, offset: u32) {
+        if offset == 0 {
+            return;
+        }
+        self.result = self.result.shifted(offset);
+        for value in &mut self.values {
+            value.ty = value.ty.shifted(offset);
+        }
+        for slot in &mut self.slots {
+            slot.ty = slot.ty.shifted(offset);
+        }
+        for block in &mut self.blocks {
+            for stmt in &mut block.stmts {
+                if let StmtKind::Def {
+                    expr:
+                        Expr::Cast { to: ty, .. } | Expr::Make { ty, .. } | Expr::MakeEnum { ty, .. },
+                    ..
+                } = &mut stmt.kind
+                {
+                    *ty = ty.shifted(offset);
+                }
+            }
+        }
+    }
+
     /// How many times each value is read.
     pub fn use_counts(&self) -> Vec<usize> {
         let mut counts = vec![0; self.values.len()];
