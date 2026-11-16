@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use femp_compiler::{Root, Session, Target, Unsupported};
+use femp_compiler::{ContractRoot, LoweredContract, Root, Session, Target, Unsupported};
 use femp_core::project::Module;
 use femp_core::property::{Machine, PropertyKind};
 use femp_prove::obligation::contract;
@@ -17,7 +17,7 @@ use femp_prove::obligation::property;
 use femp_prove::passes;
 use femp_prove::report::ClaimKind;
 use femp_prove::{Dumps, NotSupported, Summary, Task, Verdict};
-use femp_spec::{Claims, Contract, ContractMode, TargetRef};
+use femp_spec::{Claims, Contract, ContractMode, StorageClaim, TargetRef};
 use femp_vir::Program;
 
 /// The declaration a claim comes from, by its index in the module's claims.
@@ -26,6 +26,8 @@ pub enum Entry {
     Property(usize),
     Machine(usize),
     Contract(usize),
+    /// A deployed contract's storage invariants.
+    Storage(usize),
 }
 
 /// What a task establishes for its claim.
@@ -50,6 +52,10 @@ pub struct ClaimPlan {
     sides: Vec<(Vec<String>, Side)>,
     /// Each distinct program of a machine, for the search after induction.
     machines: Vec<MachineSide>,
+    /// The machine a contract is proved as, once it is lowered.
+    pub machine: Option<Machine>,
+    /// The selector of each of a contract's messages, for replay.
+    pub selectors: Vec<Option<u32>>,
 }
 
 pub struct MachineSide {
@@ -126,6 +132,8 @@ fn skeleton(
         assumed: Vec::new(),
         sides: Vec::new(),
         machines: Vec::new(),
+        machine: None,
+        selectors: Vec::new(),
     }
 }
 
@@ -179,7 +187,54 @@ pub fn skeletons(module: &Module, claims: &Claims) -> Vec<ClaimPlan> {
             Entry::Contract(index),
         ));
     }
+    for (index, claim) in claims.storage.iter().enumerate() {
+        plans.push(skeleton(
+            module,
+            &claim.name,
+            ClaimKind::Contract,
+            claim.location.to_string(),
+            Entry::Storage(index),
+        ));
+    }
     plans
+}
+
+fn contract_root(claim: &StorageClaim) -> ContractRoot {
+    ContractRoot {
+        path: claim.path.clone(),
+        name: claim.name.clone(),
+        invariants: claim
+            .invariants
+            .iter()
+            .map(|invariant| Root::function(&invariant.path, &invariant.name))
+            .collect(),
+    }
+}
+
+/// A lowered contract as the machine it is proved as.
+fn contract_machine(claim: &StorageClaim, contract: &LoweredContract) -> (Machine, MachineFns) {
+    fn handler(handler: &femp_compiler::Handler) -> machine::ContractHandler<'_> {
+        machine::ContractHandler {
+            name: &handler.name,
+            params: &handler.params,
+            func: handler.func,
+        }
+    }
+    let arms: Vec<machine::ContractHandler<'_>> = contract.arms.iter().map(handler).collect();
+    let invariants: Vec<(&str, femp_vir::FuncId)> = claim
+        .invariants
+        .iter()
+        .zip(&contract.invariants)
+        .map(|(invariant, func)| (invariant.name.as_str(), *func))
+        .collect();
+    machine::contract_machine(
+        &claim.name,
+        &claim.path,
+        claim.location.clone(),
+        handler(&contract.init),
+        &arms,
+        &invariants,
+    )
 }
 
 fn not_supported(error: &Unsupported) -> Verdict {
@@ -280,6 +335,7 @@ fn machine_fns(
         commands: take(machine.commands.len())?,
         invariants: take(machine.invariants.len())?,
         observations: take(machine.observations.len())?,
+        reverts: false,
     })
 }
 
@@ -297,7 +353,8 @@ pub fn add_target(
     let loaded = Session::open(&module.dir, target)
         .map_err(|error| anyhow!("cannot load `{}` for {label}: {error}", module.name))?;
     let wanted = roots(claims);
-    let lowered = loaded.lower(&wanted.roots);
+    let contracts: Vec<ContractRoot> = claims.storage.iter().map(contract_root).collect();
+    let lowered = loaded.lower_with(&wanted.roots, &contracts);
     let program = &lowered.program;
     let available = summaries(claims, &wanted, &lowered.roots);
     let context = Context {
@@ -362,6 +419,30 @@ pub fn add_target(
                     }
                     Err(error) => record(plan, Role::Main, label, not_supported(&error)),
                 }
+            }
+            Entry::Storage(index) => {
+                let contract = match &lowered.contracts[index] {
+                    Ok(contract) => contract,
+                    Err(error) => {
+                        record(plan, Role::Main, label, not_supported(error));
+                        continue;
+                    }
+                };
+                let (declared, fns) = contract_machine(&claims.storage[index], contract);
+                let init = machine::init_task(program, &fns, &declared);
+                add_built(plan, Role::Init, init, &context);
+                for command in 0..declared.commands.len() {
+                    let step = machine::step_task(program, &fns, &declared, command);
+                    add_built(plan, Role::Step(command), step, &context);
+                }
+                plan.machines.push(MachineSide {
+                    targets: vec![label.to_string()],
+                    program: program.clone(),
+                    fns,
+                    summaries: available.clone(),
+                });
+                plan.machine = Some(declared);
+                plan.selectors = contract.arms.iter().map(|arm| arm.selector).collect();
             }
         }
     }
@@ -559,10 +640,15 @@ pub fn compare_sides(plans: &mut [ClaimPlan], claims: &Claims, options: &Options
 /// induction failed.
 pub fn add_searches(plans: &mut [ClaimPlan], claims: &Claims, options: &Options) {
     for plan in plans.iter_mut() {
-        let Entry::Machine(index) = plan.entry else {
-            continue;
+        let declared = match plan.entry {
+            Entry::Machine(index) => claims.suite.machines[index].clone(),
+            Entry::Storage(_) => match &plan.machine {
+                Some(declared) => declared.clone(),
+                None => continue,
+            },
+            _ => continue,
         };
-        let declared = &claims.suite.machines[index];
+        let declared = &declared;
         let sides = std::mem::take(&mut plan.machines);
         for side in sides {
             let failed = plan.results.iter().any(|pending| {

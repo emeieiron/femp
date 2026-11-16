@@ -1,6 +1,6 @@
 //! Reads the items discovery cares about from one module's tokens:
-//! functions with their attributes and signatures, structs, and inherent
-//! `impl` blocks. Everything else is skipped. The parser is deliberately
+//! functions with their attributes and signatures, structs, contracts, and
+//! inherent `impl` blocks. Everything else is skipped. The parser is deliberately
 //! shallow: signatures it records are later compiled into a harness, so the
 //! Fe compiler checks anything this reads wrongly.
 
@@ -53,6 +53,14 @@ pub struct RawStruct {
     pub line: usize,
 }
 
+/// A `contract` declaration; its body is skipped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawContract {
+    pub public: bool,
+    pub name: String,
+    pub line: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawImpl {
     pub type_name: String,
@@ -67,6 +75,7 @@ pub struct RawModule {
     pub conditional: bool,
     pub fns: Vec<RawFn>,
     pub structs: Vec<RawStruct>,
+    pub contracts: Vec<RawContract>,
     pub impls: Vec<RawImpl>,
 }
 
@@ -152,6 +161,11 @@ impl<'a> Parser<'a> {
                 Some("impl") => {
                     if let Some(item) = self.implementation() {
                         module.impls.push(item);
+                    }
+                }
+                Some("contract") => {
+                    if let Some(item) = self.contract(public) {
+                        module.contracts.push(item);
                     }
                 }
                 Some("mod") if self.peek_at(2).is_some_and(|t| t.is_punct("{")) => {
@@ -329,6 +343,28 @@ impl<'a> Parser<'a> {
         }
         Some(RawStruct {
             attrs,
+            public,
+            name,
+            line: name_token.line,
+        })
+    }
+
+    fn contract(&mut self, public: bool) -> Option<RawContract> {
+        self.position += 1;
+        let name_token = self.next()?;
+        let name = name_token.ident()?.to_string();
+        while let Some(token) = self.peek() {
+            if token.is_punct("{") {
+                self.balanced("{", "}");
+                break;
+            }
+            if token.is_punct("(") {
+                self.balanced("(", ")");
+            } else {
+                self.position += 1;
+            }
+        }
+        Some(RawContract {
             public,
             name,
             line: name_token.line,

@@ -6,7 +6,7 @@ use crate::environment::{Environment, OptLevel};
 use crate::error::{Error, Result};
 use crate::outcome::TestRun;
 use crate::project::{Module, Project};
-use crate::property::{Executor, HarnessRequest};
+use crate::property::{Delivery, Executor, HarnessRequest, Transactions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PlatformId(String);
@@ -102,6 +102,22 @@ pub trait Platform {
         Err(Error::Unavailable {
             platform: self.id().to_string(),
             reason: "this platform cannot run property tests".to_string(),
+        })
+    }
+
+    /// Builds the module, deploys its contract and sends it each call, and
+    /// returns what became of the deployment and of each call. Platforms
+    /// without contracts keep the default.
+    fn run_contract(
+        &self,
+        _cx: &Context<'_>,
+        _module: &Module,
+        _transactions: &Transactions,
+        _out_dir: &Path,
+    ) -> Result<Vec<Delivery>> {
+        Err(Error::Unavailable {
+            platform: self.id().to_string(),
+            reason: "this platform has no contracts".to_string(),
         })
     }
 }

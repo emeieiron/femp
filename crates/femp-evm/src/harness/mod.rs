@@ -1,7 +1,7 @@
 //! Property harnesses for the EVM: a generated contract run in an
 //! in-process EVM.
 
-mod exec;
+pub(crate) mod exec;
 mod render;
 
 use std::fs;

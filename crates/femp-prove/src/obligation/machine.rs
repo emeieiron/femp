@@ -3,8 +3,15 @@
 //! the invariants hold without panicking, must keep them, without panicking
 //! itself. Observations must not panic either. When induction fails, a
 //! bounded search from `#[init]` looks for a real sequence of commands.
+//!
+//! A contract is proved as a machine whose initializer and commands may
+//! revert: a panic in them undoes the transaction, which then cannot break
+//! an invariant, so the execution is not considered further. Its block
+//! clock does not run backwards along a searched sequence.
 
-use femp_core::property::{Machine, Method, Sequence, Step, Ty, U256, Value};
+use femp_core::property::{
+    Command, Location, Machine, Method, Param, Sequence, Step, Ty, U256, Value,
+};
 use femp_spec::Domain;
 use femp_vir::{
     BinOp, Check, Const, Cursor, Expr, FuncId, Function, Mode, Program, Succ, Terminator, Type,
@@ -21,7 +28,13 @@ pub struct MachineFns {
     pub commands: Vec<FuncId>,
     pub invariants: Vec<FuncId>,
     pub observations: Vec<FuncId>,
+    /// The initializer and commands revert rather than fail on a panic.
+    pub reverts: bool,
 }
+
+/// Parameters of a contract's handlers that never decrease from one
+/// transaction to the next.
+const MONOTONIC: [&str; 2] = ["ctx.timestamp", "ctx.block_number"];
 
 struct Builder<'a> {
     program: &'a Program,
@@ -31,6 +44,8 @@ struct Builder<'a> {
     entry: Function,
     inputs: Vec<Input>,
     assumed: Vec<String>,
+    /// The latest value of each monotonic parameter along a sequence.
+    clock: Vec<(&'static str, ValueId)>,
 }
 
 impl<'a> Builder<'a> {
@@ -44,6 +59,7 @@ impl<'a> Builder<'a> {
             entry: Function::new(name, Type::Unit, init.span.clone()),
             inputs: Vec::new(),
             assumed: Vec::new(),
+            clock: Vec::new(),
         }
     }
 
@@ -55,8 +71,9 @@ impl<'a> Builder<'a> {
         Cursor::new(&mut self.entry, block)
     }
 
-    /// Calls `#[init]` with chosen arguments.
-    fn init(&mut self, block: femp_vir::BlockId) -> Result<ValueId, String> {
+    /// Calls `#[init]` with chosen arguments, and returns the state and the
+    /// block that continues after it.
+    fn init(&mut self, block: femp_vir::BlockId) -> Result<(ValueId, femp_vir::BlockId), String> {
         let state = self.state.clone();
         let (init, machine) = (self.fns.init, self.machine);
         let mut cursor = Cursor::new(&mut self.entry, block);
@@ -66,7 +83,79 @@ impl<'a> Builder<'a> {
             &mut self.inputs,
             &mut self.assumed,
         )?;
-        Ok(cursor.call(init, args, state))
+        for (param, value) in machine.init.params.iter().zip(&args) {
+            if let Some(name) = MONOTONIC.iter().find(|name| **name == param.name) {
+                self.clock.push((name, *value));
+            }
+        }
+        Ok(self.run(block, init, args, state))
+    }
+
+    /// Calls `func` from `block`. A call that may revert runs in a block of
+    /// its own where a panic ends the execution instead of failing it; what
+    /// follows continues in a new block of `block`'s mode.
+    fn run(
+        &mut self,
+        block: femp_vir::BlockId,
+        func: FuncId,
+        args: Vec<ValueId>,
+        ty: Type,
+    ) -> (ValueId, femp_vir::BlockId) {
+        if !self.fns.reverts {
+            return (self.cursor(block).call(func, args, ty), block);
+        }
+        let mode = self.entry.block(block).mode;
+        let run = self.entry.new_block();
+        self.entry.block_mut(run).mode = mode.max(Mode::Trusted);
+        let after = self.entry.new_block();
+        self.entry.block_mut(after).mode = mode;
+        self.cursor(block)
+            .terminate(Terminator::Goto(Succ::to(run)));
+        let value = self.cursor(run).call(func, args, ty);
+        self.cursor(run)
+            .terminate(Terminator::Goto(Succ::to(after)));
+        (value, after)
+    }
+
+    /// Makes the monotonic parameters of every command at a step one value
+    /// that is at least the one before it.
+    fn tick(&mut self, block: femp_vir::BlockId, args: &[Vec<ValueId>]) {
+        let machine = self.machine;
+        for name in MONOTONIC {
+            let values: Vec<ValueId> = machine
+                .commands
+                .iter()
+                .zip(args)
+                .flat_map(|(command, args)| {
+                    command
+                        .method
+                        .params
+                        .iter()
+                        .zip(args)
+                        .filter(|(param, _)| param.name == name)
+                        .map(|(_, value)| *value)
+                })
+                .collect();
+            let Some(first) = values.first().copied() else {
+                continue;
+            };
+            let previous = self
+                .clock
+                .iter()
+                .find(|(known, _)| *known == name)
+                .map(|(_, value)| *value);
+            let mut cursor = Cursor::new(&mut self.entry, block);
+            for other in &values[1..] {
+                let same = cursor.binary(BinOp::Eq, *other, first);
+                cursor.assume(same);
+            }
+            if let Some(previous) = previous {
+                let later = cursor.binary(BinOp::Ge, first, previous);
+                cursor.assume(later);
+            }
+            self.clock.retain(|(known, _)| *known != name);
+            self.clock.push((name, first));
+        }
     }
 
     /// Asserts every invariant of `state`, and calls every observation so
@@ -126,7 +215,7 @@ pub fn init_task(program: &Program, fns: &MachineFns, machine: &Machine) -> Resu
         &format!("prove {}::init", machine.name),
     );
     let block = builder.entry.entry;
-    let state = builder.init(block)?;
+    let (state, block) = builder.init(block)?;
     builder.check(block, state, &format!("`{}`", machine.init.name));
     Ok(builder.finish(block))
 }
@@ -172,7 +261,7 @@ pub fn step_task(
         }
         cursor.terminate(Terminator::Goto(Succ::to(body)));
     }
-    let next = {
+    let args = {
         let mut cursor = Cursor::new(&mut builder.entry, body);
         for held in holds {
             cursor.assume(held);
@@ -184,10 +273,11 @@ pub fn step_task(
             &mut builder.inputs,
             &mut builder.assumed,
         )?);
-        cursor.call(fns.commands[command], args, state_ty)
+        args
     };
-    builder.check(body, next, &format!("`{}`", method.name));
-    Ok(builder.finish(body))
+    let (next, after) = builder.run(body, fns.commands[command], args, state_ty);
+    builder.check(after, next, &format!("`{}`", method.name));
+    Ok(builder.finish(after))
 }
 
 /// The search for a sequence of `steps` commands from `#[init]` that breaks
@@ -209,7 +299,8 @@ pub fn search_task(
     );
     let mut block = builder.entry.entry;
     builder.entry.block_mut(block).mode = mode(steps > 0);
-    let mut state = builder.init(block)?;
+    let (mut state, after) = builder.init(block)?;
+    block = after;
     builder.check(block, state, &format!("`{}`", machine.init.name));
     let count = machine.commands.len();
     let choice_ty = Ty::Uint(32);
@@ -239,6 +330,7 @@ pub fn search_task(
             }
             (choice, args)
         };
+        builder.tick(block, &args);
         let earlier = step < steps;
         let join = builder.entry.new_block();
         builder.entry.block_mut(join).mode = mode(earlier);
@@ -246,7 +338,11 @@ pub fn search_task(
         builder.entry.block_mut(join).params.push(next);
         for (index, command_args) in args.into_iter().enumerate() {
             let run = builder.entry.new_block();
-            builder.entry.block_mut(run).mode = mode(earlier);
+            builder.entry.block_mut(run).mode = if fns.reverts {
+                mode(earlier).max(Mode::Trusted)
+            } else {
+                mode(earlier)
+            };
             let rest = if index + 1 < count {
                 let rest = builder.entry.new_block();
                 builder.entry.block_mut(rest).mode = mode(earlier);
@@ -326,4 +422,58 @@ pub fn decode(machine: &Machine, steps: usize, values: &[Value]) -> Option<Seque
 /// The arguments of `method` among a step task's inputs, after its state.
 pub fn method_args<'v>(method: &Method, values: &'v [Value]) -> &'v [Value] {
     &values[..method.params.len().min(values.len())]
+}
+
+/// A handler of a contract, as the machine it is proved as calls it.
+pub struct ContractHandler<'a> {
+    pub name: &'a str,
+    pub params: &'a [Param],
+    pub func: FuncId,
+}
+
+/// A contract as a machine: its `init` is the initializer, its message
+/// handlers the commands, and its storage invariants the invariants.
+pub fn contract_machine(
+    name: &str,
+    path: &[String],
+    location: Location,
+    init: ContractHandler<'_>,
+    arms: &[ContractHandler<'_>],
+    invariants: &[(&str, FuncId)],
+) -> (Machine, MachineFns) {
+    let method = |name: &str, params: &[Param]| Method {
+        name: name.to_string(),
+        params: params.to_vec(),
+        effects: Vec::new(),
+        location: location.clone(),
+    };
+    let machine = Machine {
+        name: name.to_string(),
+        path: path.to_vec(),
+        init: method(init.name, init.params),
+        commands: arms
+            .iter()
+            .map(|arm| Command {
+                method: method(arm.name, arm.params),
+                weight: 1,
+            })
+            .collect(),
+        invariants: invariants
+            .iter()
+            .map(|(name, _)| method(name, &[]))
+            .collect(),
+        observations: Vec::new(),
+        steps: "1..=16".to_string(),
+        runs: None,
+        clock: None,
+        location: location.clone(),
+    };
+    let fns = MachineFns {
+        init: init.func,
+        commands: arms.iter().map(|arm| arm.func).collect(),
+        invariants: invariants.iter().map(|(_, func)| *func).collect(),
+        observations: Vec::new(),
+        reverts: true,
+    };
+    (machine, fns)
 }

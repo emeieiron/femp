@@ -3,17 +3,20 @@
 
 use std::collections::HashMap;
 
-use femp_vir::{Field, Type, TypeDef, TypeTable, Variant};
+use femp_vir::{Field, Type, TypeDef, TypeId, TypeTable, Variant};
 use hir::analysis::HirAnalysisDb;
 use hir::analysis::semantic::{SemanticInstance, VariantIndex};
 use hir::analysis::ty::adt_def::AdtRef;
 use hir::analysis::ty::ty_def::{CapabilityKind, PrimTy, TyId};
 use hir::hir_def::{EnumVariant, Partial};
 
+use crate::lower::evm::{CONTEXT, is_evm};
+
 pub(crate) struct Types<'db> {
     pub table: TypeTable,
     lowered: HashMap<TyId<'db>, Type>,
     word_bits: u16,
+    evm: Option<TypeId>,
 }
 
 impl<'db> Types<'db> {
@@ -22,6 +25,7 @@ impl<'db> Types<'db> {
             table: TypeTable::default(),
             lowered: HashMap::new(),
             word_bits,
+            evm: None,
         }
     }
 
@@ -52,6 +56,9 @@ impl<'db> Types<'db> {
         if let Some((kind, target)) = ty.as_capability(db) {
             return match kind {
                 CapabilityKind::View | CapabilityKind::Ref => self.lower(db, instance, target),
+                // The modeled context cannot change, so a mutable borrow of it
+                // is the context itself.
+                CapabilityKind::Mut if is_evm(db, target) => self.lower(db, instance, target),
                 CapabilityKind::Mut => Err(format!(
                     "`{}` is a mutable borrow, which the prover does not support yet",
                     ty.pretty_print(db)
@@ -60,6 +67,9 @@ impl<'db> Types<'db> {
         }
         if let Some(prim) = ty.as_prim(db) {
             return self.primitive(db, instance, ty, prim);
+        }
+        if is_evm(db, ty) {
+            return Ok(self.evm());
         }
         if let Some(def) = ty.adt_def(db) {
             let name = ty.pretty_print(db).to_string();
@@ -122,6 +132,25 @@ impl<'db> Types<'db> {
             "values of type `{}` are not supported",
             ty.pretty_print(db)
         ))
+    }
+
+    /// The EVM context, as a struct of the values `Ctx` reads.
+    pub fn evm(&mut self) -> Type {
+        if let Some(found) = self.evm {
+            return Type::Adt(found);
+        }
+        let id = self.table.push(TypeDef::Struct {
+            name: "Evm".to_string(),
+            fields: CONTEXT
+                .iter()
+                .map(|(_, name)| Field {
+                    name: name.trim_start_matches("ctx.").to_string(),
+                    ty: Type::uint(256),
+                })
+                .collect(),
+        });
+        self.evm = Some(id);
+        Type::Adt(id)
     }
 
     fn primitive(

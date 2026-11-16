@@ -36,7 +36,7 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
     let found = claims::discover_all(project, &platforms, args.filter.as_deref())?;
     if found.is_empty() {
         console::warning(
-            "no `#[property]`, `#[differential]`, `#[machine]` or `#[spec]` claims found",
+            "no `#[property]`, `#[differential]`, `#[machine]`, `#[spec]` or `#[invariant]` claims found",
         );
         return Ok(true);
     }
@@ -126,6 +126,7 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
                 .zip(&cases)
                 .zip(&relies_on)
                 .filter(|(((_, plan), _), _)| plan.module == module.name)
+                .filter(|(((_, plan), _), _)| !matches!(plan.entry, plan::Entry::Storage(_)))
                 .filter_map(|(((report, plan), case), relied)| {
                     Some(replay::Found {
                         plan,
@@ -136,6 +137,22 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
                 })
                 .collect();
             replayer.replay(module, module_claims, pending)?;
+            let contracts: Vec<replay::Found<'_>> = claims
+                .iter_mut()
+                .zip(&flat)
+                .zip(&cases)
+                .filter(|((_, plan), _)| plan.module == module.name)
+                .filter(|((_, plan), _)| matches!(plan.entry, plan::Entry::Storage(_)))
+                .filter_map(|((report, plan), case)| {
+                    Some(replay::Found {
+                        plan,
+                        report,
+                        case: case.clone()?,
+                        relied: false,
+                    })
+                })
+                .collect();
+            replayer.replay_contracts(module, contracts)?;
         }
     }
     let report = ProveReport {
