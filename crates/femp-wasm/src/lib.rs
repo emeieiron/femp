@@ -12,8 +12,7 @@ use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
 use femp_core::{Error, Result};
-use femp_compiler::Target;
-use femp_toolchain::module_ops;
+use femp_compiler::{Target, TestOptions, WasmRunner};
 use femp_toolchain::node::MIN_MAJOR as MIN_NODE_MAJOR;
 
 pub use build::{MANIFEST, MODULE};
@@ -77,8 +76,16 @@ impl Platform for WasmPlatform {
     }
 
     fn test(&self, cx: &Context<'_>, module: &Module, filter: Option<&str>) -> Result<TestRun> {
-        require_node(cx)?;
-        module_ops::test(cx, BACKEND, &self.id, module, filter)
+        let node = require_node(cx)?;
+        let options = TestOptions {
+            optimize: cx.optimize,
+            filter,
+            wasm: Some(WasmRunner {
+                node,
+                host_script: bindings::HOST_SCRIPT,
+            }),
+        };
+        femp_compiler::test(module, &self.id, Target::Wasm, &options)
     }
 
     fn bindings(
@@ -116,15 +123,16 @@ impl Platform for WasmPlatform {
     }
 }
 
-fn require_node(cx: &Context<'_>) -> Result<()> {
-    let node = cx.environment.host.node_major;
-    if node.is_none_or(|major| major < MIN_NODE_MAJOR) {
-        return Err(Error::Unavailable {
+/// The Node.js that runs WebAssembly code.
+fn require_node<'a>(cx: &Context<'a>) -> Result<&'a Path> {
+    let host = &cx.environment.host;
+    match (&host.node, host.node_major) {
+        (Some(node), Some(major)) if major >= MIN_NODE_MAJOR => Ok(node),
+        _ => Err(Error::Unavailable {
             platform: ID.to_string(),
             reason: format!(
                 "running WebAssembly code needs Node.js {MIN_NODE_MAJOR} or newer on PATH (the femp installer provides one)"
             ),
-        });
+        }),
     }
-    Ok(())
 }
