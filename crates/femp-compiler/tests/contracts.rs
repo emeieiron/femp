@@ -11,6 +11,7 @@ fn ledger() -> ContractRoot {
         path: Vec::new(),
         name: "Ledger".to_string(),
         invariants: vec![Root::function(&[], "within_cap")],
+        messages: Vec::new(),
     }
 }
 

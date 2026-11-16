@@ -30,6 +30,8 @@ REFUTED     core::halves_stay_small           returns false
 | `#[machine]` | By induction: `#[init]` establishes every `#[invariant]`, and each `#[command]`, from any state on which the invariants hold, keeps them. Nothing panics, observations included. |
 | `#[spec]` | For every input its `requires` allow, its target returns without panicking and its `ensures` hold. |
 | Contract `#[invariant]` | By induction over messages: the storage `init` leaves satisfies every invariant, and each `recv` arm, from any storage that satisfies them, leaves storage that does. A transaction that reverts changes nothing. |
+| `#[ensures(message = ..)]` | From any storage the contract's invariants allow, every transaction of the message that goes through leaves the storage it describes. |
+| `#[reverts(message = ..)]` | From any storage the invariants allow, the message reverts exactly when it holds. |
 
 A panic is any way the code stops abnormally: checked arithmetic that leaves its type,
 division by zero, a signed `MIN / -1`, an index past the end of an array, a failed `assert`,
@@ -173,7 +175,52 @@ EVM rejects means the proof's model and the contract disagree, which fails the r
 does not expose storage, so the replay confirms that the transactions go through, not the broken
 invariant itself.
 
-Contract invariants are proved only. `femp prop` tests contracts through `#[machine]`s that
+### What one message does
+
+`#[ensures]` and `#[reverts]` state what a single message does. Their parameters are named after
+what they read: a field is the storage before the message, `<field>_after` the storage after it,
+a message field the argument, and `caller`, `value`, `timestamp`, `block_number`, `origin` or
+another context field what the transaction runs with. Any other parameter ranges over every
+value of its type:
+
+```fe
+/// A transfer that goes through moves `amount` from the caller to `to`,
+/// unless the caller holds less, and leaves every other account alone.
+#[ensures(message = "Transfer")]
+fn transfer_moves_tokens(
+    store: TokenStore,
+    store_after: TokenStore,
+    to: Address,
+    amount: u256,
+    caller: Address,
+    account: Address,
+) -> bool { ... }
+
+/// Minting reverts exactly when someone other than the owner asks, or when
+/// the recipient or the supply would pass its limit.
+#[reverts(message = "Mint")]
+fn mint_reverts(store: TokenStore, to: Address, amount: u256, caller: Address) -> bool {
+    caller != store.owner
+        || amount > CAP - store.balances.get(key: to)
+        || amount > u256::max() - store.supply
+}
+```
+
+Each is proved from any storage the contract's invariants allow, which it assumes, proved or not.
+`#[reverts]` is proved in both directions: where it holds, the message reverts; where it does not,
+the message goes through, so any panic there fails it. When a check fails, a search looks for a
+sequence of up to `--steps` messages from deployment that ends in the message and breaks it, and
+replays it on the EVM. Without one the claim is unknown, with the storage the invariants allow
+that breaks it: stronger invariants may rule that storage out.
+
+```
+REFUTED     contracts::transfer_reverts_when_short  `Transfer` goes through although `transfer_reverts_when_short` holds
+            init(ctx.caller = 0)
+            1. Transfer(ctx.caller = 0, to = 0, amount = 1)
+            evm accepts every transaction
+```
+
+Contract invariants and message claims are proved only. `femp prop` tests contracts through `#[machine]`s that
 deploy them and send them messages.
 
 ## Loops

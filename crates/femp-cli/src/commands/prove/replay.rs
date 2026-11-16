@@ -115,7 +115,7 @@ impl Replayer<'_> {
                         .filter(|contract| contract.runnable().is_some())
                         .count()
             }),
-            Entry::Machine(_) | Entry::Storage(_) => None,
+            Entry::Machine(_) | Entry::Storage(_) | Entry::Message(..) => None,
         };
         let (entry_name, judged, outcomes) = match (found.plan.entry, &found.case) {
             (Entry::Property(_) | Entry::Contract(_), ReplayCase::Args(values))
@@ -247,9 +247,16 @@ impl Replayer<'_> {
             .join(&label)
             .join(&module.name);
         for item in found {
-            let (Some(machine), ReplayCase::Sequence(sequence)) = (&item.plan.machine, &item.case)
-            else {
-                continue;
+            let (machine, sequence, last_goes_through) = match (&item.plan.machine, &item.case) {
+                (Some(machine), ReplayCase::Sequence(sequence)) => (machine, sequence, true),
+                (
+                    Some(machine),
+                    ReplayCase::Transactions {
+                        sequence,
+                        last_goes_through,
+                    },
+                ) => (machine, sequence, *last_goes_through),
+                _ => continue,
             };
             let transactions = transactions(machine, &item.plan.selectors, sequence);
             console::step("Replaying", &format!("{} [{label}]", machine.name));
@@ -263,30 +270,42 @@ impl Replayer<'_> {
                     continue;
                 }
             };
-            let rejected =
-                deliveries
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, delivery)| match delivery {
-                        Delivery::Rejected(outcome) => Some((index, outcome.clone())),
-                        Delivery::Accepted => None,
-                    });
+            // Every transaction goes through but, when the claim says it must
+            // revert, the last.
+            let last = deliveries.len().saturating_sub(1);
+            let unexpected = deliveries.iter().enumerate().find_map(|(index, delivery)| {
+                let goes_through = index < last || last_goes_through;
+                match (delivery, goes_through) {
+                    (Delivery::Rejected(outcome), true) => Some((index, Some(outcome.clone()))),
+                    (Delivery::Accepted, false) => Some((index, None)),
+                    _ => None,
+                }
+            });
             let ClaimStatus::Refuted(refuted) = &mut item.report.status else {
                 continue;
             };
-            let outcome = match &rejected {
-                None => "accepts every transaction".to_string(),
-                Some((0, outcome)) => format!("rejects the deployment: {outcome}"),
-                Some((step, outcome)) => format!(
-                    "rejects step {step} (`{}`): {outcome}",
-                    transactions.calls[step - 1].name
-                ),
+            let name = |step: usize| match step {
+                0 => "the deployment".to_string(),
+                step => format!("step {step} (`{}`)", transactions.calls[step - 1].name),
+            };
+            let outcome = match &unexpected {
+                None if last_goes_through => "accepts every transaction".to_string(),
+                None => match deliveries.last() {
+                    Some(Delivery::Rejected(outcome)) => {
+                        format!("rejects {} as the claim says: {outcome}", name(last))
+                    }
+                    _ => format!("rejects {} as the claim says", name(last)),
+                },
+                Some((step, Some(outcome))) => format!("rejects {}: {outcome}", name(*step)),
+                Some((step, None)) => {
+                    format!("accepts {}, which the model says reverts", name(*step))
+                }
             };
             refuted.replay = vec![Replay {
                 target: label.clone(),
                 outcome,
             }];
-            if rejected.is_some() {
+            if unexpected.is_some() {
                 item.report.notes.push(
                     "the compiled targets do not reproduce this counterexample: the proof model and the compiled code disagree"
                         .to_string(),

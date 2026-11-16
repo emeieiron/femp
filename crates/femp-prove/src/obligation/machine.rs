@@ -353,8 +353,22 @@ pub fn search_task(
         machine,
         &format!("search {} in {steps} steps", machine.name),
     );
+    let (_, block) = sequence(&mut builder, steps, true)?;
+    Ok(builder.finish(block))
+}
+
+/// `steps` commands from `#[init]`, each checked against the invariants;
+/// only the last step's checks are obligations, and only when `checked`.
+/// Returns the state and the block that continues after it.
+fn sequence(
+    builder: &mut Builder<'_>,
+    steps: usize,
+    checked: bool,
+) -> Result<(ValueId, femp_vir::BlockId), String> {
+    let machine = builder.machine;
+    let fns = builder.fns;
     let mut block = builder.entry.entry;
-    builder.entry.block_mut(block).mode = mode(steps > 0);
+    builder.entry.block_mut(block).mode = mode(steps > 0 || !checked);
     let (mut state, after) = builder.init(block)?;
     block = after;
     builder.check(block, state, &format!("`{}`", machine.init.name), None)?;
@@ -387,7 +401,7 @@ pub fn search_task(
             (choice, args)
         };
         builder.tick(block, &args);
-        let earlier = step < steps;
+        let earlier = step < steps || !checked;
         let join = builder.entry.new_block();
         builder.entry.block_mut(join).mode = mode(earlier);
         let next = builder.entry.new_value(state_ty.clone(), None);
@@ -435,7 +449,7 @@ pub fn search_task(
         block = join;
         state = next;
     }
-    Ok(builder.finish(block))
+    Ok((state, block))
 }
 
 /// Most instances of an invariant's hypothesis an induction step assumes.
@@ -570,4 +584,226 @@ pub fn contract_machine(
         reverts: true,
     };
     (machine, fns)
+}
+
+/// What a message claim asks of its message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageCheck {
+    /// The claim holds after every transaction of the message that goes
+    /// through.
+    Ensures,
+    /// Where the claim holds, the message reverts.
+    Reverts,
+    /// Where the claim does not hold, the message goes through.
+    GoesThrough,
+}
+
+/// A message claim of a contract proved as a machine.
+pub struct MessageFn<'a> {
+    pub name: &'a str,
+    pub func: FuncId,
+    /// The index of the message's command.
+    pub command: usize,
+    /// The values the claim ranges over.
+    pub params: &'a [Param],
+}
+
+/// The claim, from any state the invariants allow.
+pub fn message_task(
+    program: &Program,
+    fns: &MachineFns,
+    machine: &Machine,
+    claim: &MessageFn<'_>,
+    check: MessageCheck,
+) -> Result<Task, String> {
+    let mut builder = Builder::new(
+        program,
+        fns,
+        machine,
+        &format!("prove {}::{}", machine.name, claim.name),
+    );
+    let first = builder.entry.entry;
+    let state_ty = builder.state.clone();
+    let state = builder
+        .cursor(first)
+        .havoc(state_ty, Some("state".to_string()));
+    builder.inputs.push(Input {
+        name: "state".to_string(),
+        value: state,
+        domain: None,
+    });
+    let block = message_step(&mut builder, first, state, claim, check, true)?;
+    Ok(builder.finish(block))
+}
+
+/// The claim at the end of a real sequence: `before` commands from
+/// `#[init]`, then the message.
+pub fn message_search_task(
+    program: &Program,
+    fns: &MachineFns,
+    machine: &Machine,
+    claim: &MessageFn<'_>,
+    check: MessageCheck,
+    before: usize,
+) -> Result<Task, String> {
+    let mut builder = Builder::new(
+        program,
+        fns,
+        machine,
+        &format!(
+            "search {}::{} after {before} steps",
+            machine.name, claim.name
+        ),
+    );
+    let (state, block) = sequence(&mut builder, before, false)?;
+    let last = builder.entry.new_block();
+    builder
+        .cursor(block)
+        .terminate(Terminator::Goto(Succ::to(last)));
+    let block = message_step(&mut builder, last, state, claim, check, false)?;
+    Ok(builder.finish(block))
+}
+
+/// Sends the message from `state` and checks the claim; with `hypothesis`,
+/// the invariants are first assumed of the state.
+fn message_step(
+    builder: &mut Builder<'_>,
+    block: femp_vir::BlockId,
+    state: ValueId,
+    claim: &MessageFn<'_>,
+    check: MessageCheck,
+    hypothesis: bool,
+) -> Result<femp_vir::BlockId, String> {
+    let machine = builder.machine;
+    let fns = builder.fns;
+    let method = &machine.commands[claim.command].method;
+    let state_ty = builder.state.clone();
+    let (chosen, every) = {
+        let mut cursor = Cursor::new(&mut builder.entry, block);
+        let chosen = choose(
+            &mut cursor,
+            &method.params,
+            &mut builder.inputs,
+            &mut builder.assumed,
+        )?;
+        let every = choose(
+            &mut cursor,
+            claim.params,
+            &mut builder.inputs,
+            &mut builder.assumed,
+        )?;
+        (chosen, every)
+    };
+    // The values the message and the claim name, by type, where the
+    // invariants are assumed.
+    let mut params: Vec<Param> = method.params.clone();
+    params.extend(claim.params.iter().cloned());
+    let mut values = chosen.clone();
+    values.extend(every.iter().copied());
+
+    let assumed = builder.entry.new_block();
+    builder.entry.block_mut(assumed).mode = Mode::Assumed;
+    builder
+        .cursor(block)
+        .terminate(Terminator::Goto(Succ::to(assumed)));
+    if hypothesis {
+        let mut holds = Vec::new();
+        for (func, invariant) in fns.invariants.iter().zip(&machine.invariants) {
+            let at = builder.every(assumed, invariant, false)?;
+            let mut cursor = builder.cursor(assumed);
+            for instance in instances(invariant, &at, &params, &values) {
+                let mut args = vec![state];
+                args.extend(instance);
+                holds.push(cursor.call(*func, args, Type::Bool));
+            }
+        }
+        let mut cursor = builder.cursor(assumed);
+        for held in holds {
+            cursor.assume(held);
+        }
+    }
+    let mut command_args = vec![state];
+    command_args.extend(chosen.iter().copied());
+    let mut claim_args = vec![state];
+    let body = builder.entry.new_block();
+    match check {
+        MessageCheck::Ensures => {
+            builder
+                .cursor(assumed)
+                .terminate(Terminator::Goto(Succ::to(body)));
+            let (after, block) =
+                builder.run(body, fns.commands[claim.command], command_args, state_ty);
+            claim_args.push(after);
+            claim_args.extend(values);
+            let mut cursor = builder.cursor(block);
+            let holds = cursor.call(claim.func, claim_args, Type::Bool);
+            cursor.assert(
+                holds,
+                Check::Claim(format!(
+                    "`{}` does not hold after `{}`",
+                    claim.name, method.name
+                )),
+            );
+            Ok(block)
+        }
+        MessageCheck::Reverts | MessageCheck::GoesThrough => {
+            claim_args.extend(values);
+            {
+                let mut cursor = builder.cursor(assumed);
+                let holds = cursor.call(claim.func, claim_args, Type::Bool);
+                let wanted = if check == MessageCheck::Reverts {
+                    holds
+                } else {
+                    cursor.not(holds)
+                };
+                cursor.assume(wanted);
+                cursor.terminate(Terminator::Goto(Succ::to(body)));
+            }
+            if check == MessageCheck::Reverts {
+                let (_, block) =
+                    builder.run(body, fns.commands[claim.command], command_args, state_ty);
+                let mut cursor = builder.cursor(block);
+                let never = cursor.boolean(false);
+                cursor.assert(
+                    never,
+                    Check::Claim(format!(
+                        "`{}` goes through although `{}` holds",
+                        method.name, claim.name
+                    )),
+                );
+                Ok(block)
+            } else {
+                // Any panic or revert of the message is a failure here.
+                builder
+                    .cursor(body)
+                    .call(fns.commands[claim.command], command_args, state_ty);
+                Ok(body)
+            }
+        }
+    }
+}
+
+/// The sequence a refuted message search task's inputs describe: the steps
+/// before the message, then the message.
+pub fn decode_message(
+    machine: &Machine,
+    command: usize,
+    before: usize,
+    values: &[Value],
+) -> Option<Sequence> {
+    let mut sequence = decode(machine, before, values)?;
+    let per_step: usize = 1 + machine
+        .commands
+        .iter()
+        .map(|command| command.method.params.len())
+        .sum::<usize>();
+    let consumed = machine.init.params.len() + before * per_step;
+    let count = machine.commands[command].method.params.len();
+    let args = values.get(consumed..consumed + count)?.to_vec();
+    sequence.steps.push(Step {
+        command,
+        args,
+        advance: 0,
+    });
+    Some(sequence)
 }

@@ -38,6 +38,9 @@ fn application(sexp: &Sexp) -> Option<(&str, &[Sexp])> {
 }
 
 pub fn show(sexp: &Sexp, ty: &Type, table: &TypeTable) -> String {
+    if let Some(expanded) = expand_lets(sexp) {
+        return show(&expanded, ty, table);
+    }
     let fallback = || render(sexp);
     match ty {
         Type::Bool => sexp.atom().map(str::to_string).unwrap_or_else(fallback),
@@ -161,6 +164,38 @@ fn array(sexp: &Sexp, elem: &Type, len: usize, table: &TypeTable) -> Option<Stri
             }
             _ => return None,
         }
+    }
+}
+
+/// A model value written with `let` bindings, with every binding
+/// substituted; `None` when the value has none.
+fn expand_lets(sexp: &Sexp) -> Option<Sexp> {
+    let [Sexp::Atom(head), Sexp::List(bindings), body] = sexp.list()? else {
+        return None;
+    };
+    if head != "let" {
+        return None;
+    }
+    let mut bound: Vec<(String, Sexp)> = Vec::new();
+    for binding in bindings {
+        let [Sexp::Atom(name), value] = binding.list()? else {
+            return None;
+        };
+        let value = substitute(value, &bound);
+        bound.push((name.clone(), expand_lets(&value).unwrap_or(value)));
+    }
+    let body = substitute(body, &bound);
+    Some(expand_lets(&body).unwrap_or(body))
+}
+
+fn substitute(sexp: &Sexp, bound: &[(String, Sexp)]) -> Sexp {
+    match sexp {
+        Sexp::Atom(name) => bound
+            .iter()
+            .rev()
+            .find(|(known, _)| known == name)
+            .map_or_else(|| sexp.clone(), |(_, value)| value.clone()),
+        Sexp::List(items) => Sexp::List(items.iter().map(|item| substitute(item, bound)).collect()),
     }
 }
 

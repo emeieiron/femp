@@ -74,3 +74,42 @@ fn balances_stay_under_the_cap(store: TokenStore, account: Address) -> bool {
 fn supply_stays_small(store: TokenStore) -> bool {
     store.supply <= 1000
 }
+
+/// A transfer that goes through moves `amount` from the caller to `to`,
+/// unless the caller holds less, and leaves every other account alone.
+#[ensures(message = "Transfer")]
+fn transfer_moves_tokens(
+    store: TokenStore,
+    store_after: TokenStore,
+    to: Address,
+    amount: u256,
+    caller: Address,
+    account: Address,
+) -> bool {
+    let before = store.balances.get(key: account)
+    let after = store_after.balances.get(key: account)
+    if to == caller || store.balances.get(key: caller) < amount {
+        after == before
+    } else if account == caller {
+        after == before - amount
+    } else if account == to {
+        after == before + amount
+    } else {
+        after == before
+    }
+}
+
+/// Minting reverts exactly when someone other than the owner asks, or when
+/// the recipient or the supply would pass its limit.
+#[reverts(message = "Mint")]
+fn mint_reverts(store: TokenStore, to: Address, amount: u256, caller: Address) -> bool {
+    caller != store.owner
+        || amount > CAP - store.balances.get(key: to)
+        || amount > u256::max() - store.supply
+}
+
+/// False: a short transfer returns `false` instead of reverting.
+#[reverts(message = "Transfer")]
+fn transfer_reverts_when_short(store: TokenStore, amount: u256, caller: Address) -> bool {
+    store.balances.get(key: caller) < amount
+}

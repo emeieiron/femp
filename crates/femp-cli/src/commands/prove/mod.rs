@@ -126,7 +126,12 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
                 .zip(&cases)
                 .zip(&relies_on)
                 .filter(|(((_, plan), _), _)| plan.module == module.name)
-                .filter(|(((_, plan), _), _)| !matches!(plan.entry, plan::Entry::Storage(_)))
+                .filter(|(((_, plan), _), _)| {
+                    !matches!(
+                        plan.entry,
+                        plan::Entry::Storage(_) | plan::Entry::Message(..)
+                    )
+                })
                 .filter_map(|(((report, plan), case), relied)| {
                     Some(replay::Found {
                         plan,
@@ -142,7 +147,12 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
                 .zip(&flat)
                 .zip(&cases)
                 .filter(|((_, plan), _)| plan.module == module.name)
-                .filter(|((_, plan), _)| matches!(plan.entry, plan::Entry::Storage(_)))
+                .filter(|((_, plan), _)| {
+                    matches!(
+                        plan.entry,
+                        plan::Entry::Storage(_) | plan::Entry::Message(..)
+                    )
+                })
                 .filter_map(|((report, plan), case)| {
                     Some(replay::Found {
                         plan,

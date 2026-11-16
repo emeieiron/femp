@@ -6,7 +6,7 @@ use femp_core::project::{Module, ModuleRole};
 use femp_core::property::{PropertyKind, Ty};
 
 use super::*;
-use crate::claims::ContractMode;
+use crate::claims::{ContractMode, MessageKind};
 
 fn module(files: &[(&str, &str)], role: ModuleRole) -> (tempfile::TempDir, Module) {
     let dir = tempfile::tempdir().unwrap();
@@ -494,4 +494,38 @@ fn an_invariant_needs_its_contract() {
     let shaped = format!("{LEDGER}\n#[invariant]\nfn wrong(store: LedgerStore) -> u64 {{ 0 }}\n");
     let errors = claims(&[("lib.fe", &shaped)]).unwrap_err();
     assert!(errors[0].contains("returns `bool`"), "{errors:?}");
+}
+
+#[test]
+fn finds_what_messages_ensure_and_when_they_revert() {
+    let source = format!(
+        "{LEDGER}\n#[ensures(message = \"Deposit\")]\nfn deposit_adds(store: LedgerStore, store_after: LedgerStore, amount: u64) -> bool {{ true }}\n\n#[reverts(message = \"Deposit\")]\nfn deposit_reverts(store: LedgerStore, amount: u64) -> bool {{ false }}\n"
+    );
+    let found_claims = claims(&[("lib.fe", &source)]).unwrap();
+    let [claim] = found_claims.storage.as_slice() else {
+        panic!("one contract, not {:?}", found_claims.storage);
+    };
+    let found: Vec<(&str, MessageKind, &str)> = claim
+        .messages
+        .iter()
+        .map(|message| {
+            (
+                message.name.as_str(),
+                message.kind,
+                message.message.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("deposit_adds", MessageKind::Ensures, "Deposit"),
+            ("deposit_reverts", MessageKind::Reverts, "Deposit"),
+        ]
+    );
+
+    let unnamed =
+        format!("{LEDGER}\n#[ensures]\nfn loose(store: LedgerStore) -> bool {{ true }}\n");
+    let errors = claims(&[("lib.fe", &unnamed)]).unwrap_err();
+    assert!(errors[0].contains("names its message"), "{errors:?}");
 }
