@@ -5,6 +5,7 @@
 pub mod capture;
 mod checks;
 mod inline;
+mod loops;
 mod recursion;
 mod scope;
 mod simplify;
@@ -22,8 +23,16 @@ pub trait Pass {
     fn run(&self, task: &mut Task) -> Result<(), NotSupported>;
 }
 
+/// How many times a loop without an invariant is unrolled by default.
+pub const DEFAULT_UNROLL: usize = 8;
+
 /// The passes every task goes through, in order.
 pub fn standard() -> Vec<Box<dyn Pass>> {
+    with_unrolling(DEFAULT_UNROLL)
+}
+
+/// The standard passes, unrolling loops without an invariant `unroll` times.
+pub fn with_unrolling(unroll: usize) -> Vec<Box<dyn Pass>> {
     vec![
         Box::new(scope::Scope),
         Box::new(recursion::Recursion),
@@ -32,6 +41,7 @@ pub fn standard() -> Vec<Box<dyn Pass>> {
         Box::new(inline::Inline),
         Box::new(slots::Slots),
         Box::new(checks::Checks),
+        Box::new(loops::Loops { unroll }),
         Box::new(simplify::Simplify),
     ]
 }

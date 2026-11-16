@@ -90,6 +90,7 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
         solver,
         timeout: Duration::from_secs(args.timeout.max(1)),
         search_budget: Duration::from_secs((args.timeout * SEARCH_BUDGET_TIMEOUTS).max(60)),
+        unroll: args.unroll as usize,
     };
     let jobs = args
         .jobs

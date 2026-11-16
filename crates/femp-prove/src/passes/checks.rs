@@ -168,6 +168,17 @@ fn rewrite(
             }
             Ok(())
         }
+        // Loop invariants are the loops pass's to read.
+        StmtKind::Spec {
+            op: SpecOp::Invariant,
+            cond,
+        } => {
+            cursor.stmt(StmtKind::Spec {
+                op: SpecOp::Invariant,
+                cond,
+            });
+            Ok(())
+        }
         StmtKind::Spec { op, cond } => {
             let kind = match op {
                 SpecOp::Requires => PanicKind::Explicit,

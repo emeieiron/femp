@@ -117,6 +117,7 @@ fn proves_and_refutes_the_fixture() {
         solver,
         timeout: Duration::from_secs(20),
         search_budget: Duration::from_secs(60),
+        unroll: 8,
     };
     for target in ["evm", "native", "wasm"] {
         for (declared, task) in tasks(target) {
@@ -140,6 +141,27 @@ fn proves_and_refutes_the_fixture() {
                         .map(|(_, value)| value.as_str())
                         .collect();
                     assert_eq!(shown, ["-128", "-1"]);
+                }
+                (
+                    "counts_to_n" | "counts_a_few" | "largest_bounds_every_element",
+                    Verdict::Proved,
+                ) => {}
+                ("counts_many", Verdict::Refuted(refutation)) => {
+                    assert_eq!(refutation.check, Check::Unwind);
+                }
+                ("counts_to_zero", Verdict::Refuted(refutation)) => {
+                    assert_eq!(refutation.shown, [("n".to_string(), "1".to_string())]);
+                }
+                ("keeps_a_wrong_invariant", Verdict::Refuted(refutation)) => {
+                    // The invariant is checked at the loop's head, so it
+                    // must hold even when the body never runs.
+                    assert_eq!(
+                        refutation.check,
+                        Check::Claim(
+                            "the loop invariant does not hold when the loop starts".into()
+                        )
+                    );
+                    assert_eq!(refutation.shown, [("n".to_string(), "0".to_string())]);
                 }
                 _ => panic!("{name} on {target}: unexpected {verdict:?}"),
             }

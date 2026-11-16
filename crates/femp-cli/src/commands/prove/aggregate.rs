@@ -197,8 +197,10 @@ pub fn report(
     (report, replay)
 }
 
+/// Whether the failing check marks a limit of the proof rather than of
+/// the code: a summary's precondition, or a loop unrolled too few times.
 fn precondition(refutation: &Refutation) -> bool {
-    matches!(refutation.check, Check::Precondition(_))
+    matches!(refutation.check, Check::Precondition(_) | Check::Unwind)
 }
 
 /// A summary's precondition may fail: the proof needs more than the spec
@@ -391,6 +393,8 @@ pub fn failure(check: &Check, span: &Span, places: &Places) -> String {
         Check::Panic(kind) => format!("panics ({kind}){at}"),
         Check::Ensures => format!("an `ensures` does not hold{at}"),
         Check::Precondition(spec) => format!("the precondition of `{spec}` may not hold{at}"),
-        Check::Unwind => format!("a loop runs longer than it was unrolled{at}"),
+        Check::Unwind => format!(
+            "the loop{at} may run more often than it was unrolled; give it an `invariant(..)` or raise `--unroll`"
+        ),
     }
 }
