@@ -1,0 +1,134 @@
+//! Drives `femp prove` against the planted-bug fixture, whose claims fail on
+//! purpose, and against the demonstrator, whose claims hold. The tests need
+//! the Fe compiler and Z3 and skip themselves when either is missing.
+
+mod common;
+
+use std::fs;
+use std::process::Command;
+
+use common::{femp, stdout};
+
+const PLANTED: &str = "tests/fixtures/planted";
+const DEMONSTRATOR: &str = "../../examples/vesting";
+
+fn solver_available() -> bool {
+    let program = std::env::var_os("FEMP_Z3").unwrap_or_else(|| "z3".into());
+    let found = Command::new(program)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !found {
+        eprintln!("skipping: Z3 is not installed");
+    }
+    found
+}
+
+fn project(relative: &str) -> Option<tempfile::TempDir> {
+    if !solver_available() {
+        return None;
+    }
+    common::project(relative)
+}
+
+/// The lines of one claim's entry in a report: its status line and the
+/// indented details under it.
+fn entry(report: &str, label: &str) -> String {
+    let lines: Vec<&str> = report.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| !line.starts_with(' ') && line.split_whitespace().nth(1) == Some(label))
+        .unwrap_or_else(|| panic!("no entry for {label} in\n{report}"));
+    let mut entry = vec![lines[start]];
+    entry.extend(
+        lines[start + 1..]
+            .iter()
+            .take_while(|line| line.starts_with(' ') && !line.trim().is_empty()),
+    );
+    entry.join("\n") + "\n"
+}
+
+#[test]
+fn planted_properties_are_refuted_and_replayed() {
+    let Some(project) = project(PLANTED) else {
+        return;
+    };
+    let output = femp(project.path(), &["prove", "--json"]);
+    let report = stdout(&output);
+    assert!(!output.status.success(), "{report}");
+
+    let halves = entry(&report, "core::halves_stay_small");
+    assert!(halves.starts_with("REFUTED"), "{halves}");
+    assert!(halves.contains("returns false"), "{halves}");
+    assert!(halves.contains("            x = 250\n"), "{halves}");
+    assert!(
+        halves.contains("evm returned false · native returned false · wasm returned false"),
+        "{halves}"
+    );
+    assert!(
+        halves.contains("saved to regressions/core/halves_stay_small.json"),
+        "{halves}"
+    );
+
+    let negation = entry(&report, "core::negation_round_trips");
+    assert!(
+        negation.contains("panics (arithmetic overflow) at shared/src/lib.fe:"),
+        "{negation}"
+    );
+    assert!(negation.contains("x = -9223372036854775808"), "{negation}");
+    assert!(
+        negation.contains("evm panicked (arithmetic overflow)"),
+        "{negation}"
+    );
+
+    let stored = fs::read_to_string(
+        project
+            .path()
+            .join("regressions/core/halves_stay_small.json"),
+    )
+    .unwrap();
+    assert!(stored.contains("\"seed\": \"proof\""), "{stored}");
+    let json = fs::read_to_string(project.path().join("build/prove/report.json")).unwrap();
+    assert!(json.contains("\"status\": \"refuted\""), "{json}");
+}
+
+#[test]
+fn proved_counterexamples_fail_property_tests_first() {
+    let Some(project) = project(PLANTED) else {
+        return;
+    };
+    femp(project.path(), &["prove", "-f", "halves"]);
+    let output = femp(project.path(), &["prop", "--seed", "9", "-f", "halves"]);
+    let report = stdout(&output);
+    assert!(report.contains("fails on a stored regression"), "{report}");
+    assert!(report.contains("      x = 250\n"), "{report}");
+}
+
+#[test]
+fn lists_the_claims_property_testing_lists() {
+    let Some(project) = project(PLANTED) else {
+        return;
+    };
+    let proved = stdout(&femp(project.path(), &["prove", "--list"]));
+    let tested = stdout(&femp(project.path(), &["prop", "--list"]));
+    assert_eq!(proved, tested);
+}
+
+#[test]
+fn the_demonstrator_properties_are_proved() {
+    let Some(project) = project(DEMONSTRATOR) else {
+        return;
+    };
+    let output = femp(project.path(), &["prove", "-f", "vest"]);
+    let report = stdout(&output);
+    for name in [
+        "vested_never_exceeds_total",
+        "vesting_never_decreases",
+        "vesting_waits_for_the_cliff",
+        "vesting_completes_at_the_end",
+    ] {
+        let line = entry(&report, &format!("core::{name}"));
+        assert!(line.starts_with("PROVED"), "{report}");
+        assert!(line.contains("on evm, native, wasm"), "{line}");
+    }
+}

@@ -100,10 +100,10 @@ impl Store {
         Ok(&self.loaded[&key])
     }
 
-    /// Adds a regression unless one with the same tape and counterexample is
-    /// already stored, and returns the file it lives in, relative to the
-    /// project root. Regressions a proof found carry no tape, so the
-    /// counterexample tells them apart.
+    /// Adds a regression unless an equal one is stored: one with the same
+    /// counterexample, or with the same non-empty tape. Regressions a proof
+    /// found carry no tape, so only their counterexample tells them apart.
+    /// Returns the file the regression lives in, relative to the project.
     pub fn save(&mut self, module: &str, entry: &str, regression: Regression) -> Result<PathBuf> {
         self.load(module, entry)?;
         let path = self.path(module, entry);
@@ -113,8 +113,8 @@ impl Store {
             .expect("loaded above");
         let relative = Path::new(DIR).join(module).join(format!("{entry}.json"));
         if stored.iter().any(|existing| {
-            existing.choices == regression.choices
-                && existing.counterexample == regression.counterexample
+            existing.counterexample == regression.counterexample
+                || (!regression.choices.is_empty() && existing.choices == regression.choices)
         }) {
             return Ok(relative);
         }
@@ -162,7 +162,7 @@ mod tests {
         assert!(store.load("core", "p").unwrap().is_empty());
         let path = store.save("core", "p", regression(&["1000"])).unwrap();
         store.save("core", "p", regression(&["1000"])).unwrap();
-        store.save("core", "p", regression(&["7"])).unwrap();
+        store.save("core", "p", found(&["7"], "7")).unwrap();
         assert_eq!(path, Path::new("regressions/core/p.json"));
         assert!(dir.path().join(&path).is_file());
 
@@ -179,6 +179,7 @@ mod tests {
         store.save("core", "p", found(&[], "250")).unwrap();
         store.save("core", "p", found(&[], "250")).unwrap();
         store.save("core", "p", found(&[], "7")).unwrap();
+        store.save("core", "p", found(&["500"], "250")).unwrap();
         assert_eq!(store.load("core", "p").unwrap().len(), 2);
     }
 

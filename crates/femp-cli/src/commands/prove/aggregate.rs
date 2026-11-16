@@ -53,7 +53,8 @@ impl Places {
     }
 }
 
-pub fn report(plan: &ClaimPlan, places: &Places) -> ClaimReport {
+/// The claim's report, and the refutation its counterexample came from.
+pub fn report(plan: &ClaimPlan, places: &Places) -> (ClaimReport, Option<Refutation>) {
     let mut targets = Vec::new();
     let mut refuted: Option<(&Refutation, Vec<String>)> = None;
     let mut unknown: Option<String> = None;
@@ -87,6 +88,9 @@ pub fn report(plan: &ClaimPlan, places: &Places) -> ClaimReport {
             }
         }
     }
+    let found = refuted
+        .as_ref()
+        .map(|(refutation, _)| (*refutation).clone());
     let status = if let Some((refutation, on)) = refuted {
         ClaimStatus::Refuted(Box::new(Refuted {
             failure: failure(&refutation.check, &refutation.span, places),
@@ -115,7 +119,7 @@ pub fn report(plan: &ClaimPlan, places: &Places) -> ClaimReport {
     } else {
         ClaimStatus::Proved
     };
-    ClaimReport {
+    let report = ClaimReport {
         module: plan.module.clone(),
         name: plan.name.clone(),
         kind: plan.kind,
@@ -124,7 +128,8 @@ pub fn report(plan: &ClaimPlan, places: &Places) -> ClaimReport {
         assumed: plan.assumed.clone(),
         notes: Vec::new(),
         status,
-    }
+    };
+    (report, found)
 }
 
 pub fn failure(check: &Check, span: &Span, places: &Places) -> String {
