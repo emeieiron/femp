@@ -1,0 +1,24 @@
+[package]
+name = "femp-frontend"
+description = "Lowers Fe code into the verification IR of Fe Multiplatform's prover"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+femp-vir.workspace = true
+cranelift-entity.workspace = true
+fe-common.workspace = true
+fe-driver.workspace = true
+fe-hir.workspace = true
+num-bigint.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

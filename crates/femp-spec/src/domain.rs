@@ -88,13 +88,19 @@ pub const BUILT_IN: [&str; 2] = ["const", "one_of"];
 pub enum Domain {
     Any(Ty),
     /// An inclusive, non-empty range.
-    Range { lo: Value, hi: Value },
+    Range {
+        lo: Value,
+        hi: Value,
+    },
     /// A non-empty list; earlier values are simpler.
     OneOf(Vec<Value>),
     Const(Value),
     /// A generator registered by name outside this crate. Tools that cannot
     /// run it treat it as the whole type.
-    Custom { name: String, args: Vec<String> },
+    Custom {
+        name: String,
+        args: Vec<String>,
+    },
 }
 
 impl Domain {

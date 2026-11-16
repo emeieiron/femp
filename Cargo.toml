@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.96"
 license = "Apache-2.0"
 repository = "https://github.com/emeieiron/femp"
 
@@ -18,11 +18,22 @@ femp-wasm = { path = "crates/femp-wasm" }
 femp-testing = { path = "crates/femp-testing" }
 femp-prop = { path = "crates/femp-prop" }
 femp-spec = { path = "crates/femp-spec" }
+femp-vir = { path = "crates/femp-vir" }
+femp-frontend = { path = "crates/femp-frontend" }
 femp-harness = { path = "crates/femp-harness" }
+
+# The Fe compiler, linked only into femp-frontend. Keep the tag in step with
+# femp_frontend::LINKED_FE_VERSION and the toolchain femp installs.
+# Fe's IR ids implement this crate's `EntityRef`.
+cranelift-entity = "0.136"
+fe-common = { git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
+fe-driver = { git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
+fe-hir = { git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
 
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 revm = { version = "33.1.0", default-features = false, features = ["std"] }
+num-bigint = "0.4"
 ruint = "1.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -30,6 +41,7 @@ sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 toml = "0.8"
+url = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

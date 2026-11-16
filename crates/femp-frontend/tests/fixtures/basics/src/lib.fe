@@ -1,0 +1,83 @@
+use core::marker::Copy
+
+pub struct Pair { pub low: u8, pub high: u8 }
+
+impl Copy for Pair {}
+
+pub enum Shape {
+    Dot,
+    Line(u64),
+    Box(u64, u64),
+}
+
+impl Copy for Shape {}
+
+impl Pair {
+    pub fn spread(self) -> u8 {
+        self.high - self.low
+    }
+}
+
+pub fn ignores(_ unused: u64, used: u64) -> u64 {
+    used
+}
+
+#[arithmetic(unchecked)]
+pub fn wraps(_ x: u8) -> u8 {
+    x + 200
+}
+
+pub fn widened(_ x: u64) -> u256 {
+    (x as u256) * 3
+}
+
+pub fn area(_ shape: Shape) -> u64 {
+    match shape {
+        Shape::Dot => 0,
+        Shape::Line(length) => length,
+        Shape::Box(width, height) => width * height,
+    }
+}
+
+pub fn sum_to(_ n: u64) -> u64 {
+    var total: u64 = 0
+    var i: u64 = 0
+    while i < n {
+        total = total + i
+        i = i + 1
+    }
+    total
+}
+
+pub fn third(_ xs: [u64; 4]) -> u64 {
+    xs[2]
+}
+
+#[cfg(target = "wasm")]
+fn word() -> u64 {
+    32
+}
+
+#[cfg(target = "evm")]
+fn word() -> u64 {
+    256
+}
+
+#[cfg(target = "native")]
+fn word() -> u64 {
+    64
+}
+
+pub fn width() -> u64 {
+    word()
+}
+
+pub fn bump(_ start: Pair) -> u8 {
+    var pair = start
+    grow(mut pair)
+    pair.high
+}
+
+fn grow(_ pair: mut Pair) {
+    pair.high = pair.high + 1
+}

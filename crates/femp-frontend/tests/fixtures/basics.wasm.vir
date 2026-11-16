@@ -1,0 +1,148 @@
+// ignores: f0
+// spread: f1
+// wraps: f2
+// widened: f3
+// area: f4
+// sum_to: f5
+// third: f6
+// width: f7
+// bump: not supported: src/lib.fe:77: mutable borrows are not supported yet
+target wasm
+type t0 Pair = struct { low: u8, high: u8 }
+type t1 Shape = enum { Dot, Line(u64), Box(u64, u64) }
+
+f0 ignores(v0: u64, v1: u64) -> u64  @src/lib.fe:21
+bb0:
+  goto bb1()
+bb1:
+  v2: u64 = v1  @src/lib.fe:22
+  return v2  @src/lib.fe:21
+
+f1 Pair::spread(v0: Pair) -> u8  @src/lib.fe:16
+bb0:
+  goto bb1()
+bb1:
+  v1: u8 = v0.1  @src/lib.fe:17
+  v2: u8 = v0.0  @src/lib.fe:17
+  v3: u8 = sub.checked v1, v2  @src/lib.fe:17
+  return v3  @src/lib.fe:16
+
+f2 wraps(v0: u8) -> u8  @src/lib.fe:26
+bb0:
+  goto bb1()
+bb1:
+  v1: u8 = v0  @src/lib.fe:27
+  v3: u8 = 200  @src/lib.fe:27
+  v2: u8 = v3  @src/lib.fe:27
+  v4: u8 = add.wrapping v1, v2  @src/lib.fe:27
+  return v4  @src/lib.fe:26
+
+f3 widened(v0: u64) -> u256  @src/lib.fe:30
+bb0:
+  goto bb1()
+bb1:
+  v1: u64 = v0  @src/lib.fe:31
+  v2: u256 = cast v1 to u256  @src/lib.fe:31
+  v4: u256 = 3  @src/lib.fe:31
+  v3: u256 = v4  @src/lib.fe:31
+  v5: u256 = mul.checked v2, v3  @src/lib.fe:31
+  return v5  @src/lib.fe:30
+
+f4 area(v0: Shape) -> u64  @src/lib.fe:34
+bb0:
+  goto bb1()
+bb1:
+  switch v0 [#0 bb4(), #1 bb3(), #2 bb2()]  @src/lib.fe:36
+bb2:
+  v2: u64 = v0.#2.0  @src/lib.fe:38
+  v3: u64 = v0.#2.0  @src/lib.fe:38
+  v4: u64 = v0.#2.1  @src/lib.fe:38
+  v5: u64 = v0.#2.1  @src/lib.fe:38
+  v6: u64 = mul.checked v3, v5  @src/lib.fe:38
+  v7: u64 = v6
+  goto bb5(v7)  @src/lib.fe:38
+bb3:
+  v8: u64 = v0.#1.0  @src/lib.fe:37
+  v9: u64 = v0.#1.0  @src/lib.fe:37
+  v10: u64 = v9
+  goto bb5(v10)  @src/lib.fe:37
+bb4:
+  v12: u64 = 0  @src/lib.fe:36
+  v11: u64 = v12  @src/lib.fe:36
+  v13: u64 = v11
+  goto bb5(v13)  @src/lib.fe:36
+bb5(v1: u64):
+  return v1  @src/lib.fe:34
+
+f5 sum_to(v0: u64) -> u64  @src/lib.fe:42
+  slot s0: u64
+  slot s1: u64
+bb0:
+  goto bb1()
+bb1:
+  v2: u64 = 0  @src/lib.fe:43
+  v1: u64 = v2  @src/lib.fe:43
+  v3: u64 = v1  @src/lib.fe:43
+  store s0 = v3  @src/lib.fe:43
+  v5: u64 = 0  @src/lib.fe:44
+  v4: u64 = v5  @src/lib.fe:44
+  v6: u64 = v4  @src/lib.fe:44
+  store s1 = v6  @src/lib.fe:44
+  goto bb2()
+bb2:
+  v7: u64 = load s1  @src/lib.fe:45
+  v8: u64 = v7  @src/lib.fe:45
+  v9: u64 = v0  @src/lib.fe:45
+  v10: bool = lt v8, v9  @src/lib.fe:45
+  branch v10 -> bb4(), bb3()
+bb3:
+  v11: u64 = load s0  @src/lib.fe:42
+  return v11  @src/lib.fe:42
+bb4:
+  v12: u64 = load s0  @src/lib.fe:46
+  v13: u64 = v12  @src/lib.fe:46
+  v14: u64 = load s1  @src/lib.fe:46
+  v15: u64 = add.checked v13, v14  @src/lib.fe:46
+  v16: u64 = v15  @src/lib.fe:46
+  store s0 = v16  @src/lib.fe:46
+  v18: () = ()
+  v17: () = v18
+  v19: u64 = load s1  @src/lib.fe:47
+  v20: u64 = v19  @src/lib.fe:47
+  v22: u64 = 1  @src/lib.fe:47
+  v21: u64 = v22  @src/lib.fe:47
+  v23: u64 = add.checked v20, v21  @src/lib.fe:47
+  v24: u64 = v23  @src/lib.fe:47
+  store s1 = v24  @src/lib.fe:47
+  v26: () = ()
+  v25: () = v26
+  goto bb2()
+
+f6 third(v0: [u64; 4]) -> u64  @src/lib.fe:52
+bb0:
+  goto bb1()
+bb1:
+  v2: u32 = 2  @src/lib.fe:53
+  v1: u32 = v2  @src/lib.fe:53
+  check_index v1 < 4  @src/lib.fe:53
+  v3: u64 = v0[v1]  @src/lib.fe:53
+  return v3  @src/lib.fe:52
+
+f7 width() -> u64  @src/lib.fe:71
+bb0:
+  goto bb1()
+bb1:
+  v0: u64 = call f8()  @src/lib.fe:72
+  return v0  @src/lib.fe:71
+
+f8 word() -> u64  @src/lib.fe:57
+bb0:
+  goto bb1()
+bb1:
+  v1: u64 = 32  @src/lib.fe:58
+  v0: u64 = v1  @src/lib.fe:58
+  return v0  @src/lib.fe:57
+
+f9 bump() -> ()  @src/lib.fe:75
+bb0:
+  unreachable

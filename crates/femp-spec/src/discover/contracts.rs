@@ -258,7 +258,11 @@ impl Builder {
                 let places: Vec<String> = several
                     .iter()
                     .map(|candidate| {
-                        format!("`{}` at {}", candidate.segments().join("::"), candidate.location)
+                        format!(
+                            "`{}` at {}",
+                            candidate.segments().join("::"),
+                            candidate.location
+                        )
                     })
                     .collect();
                 self.error(
