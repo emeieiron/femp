@@ -1,15 +1,15 @@
 #!/bin/sh
-# Installs femp with everything it needs: the femp binary, the Fe compiler it
-# drives, the Z3 solver `femp prove` uses, Node.js (for WebAssembly) when no
-# Node.js 20 or newer is found, and a C compiler (for native executables)
-# when none is found.
+# Installs femp with everything it needs: the femp binary, which has the Fe
+# compiler built in, the Z3 solver `femp prove` uses, Node.js (for
+# WebAssembly) when no Node.js 20 or newer is found, and a C compiler (for
+# native executables) when none is found.
 #
 #   curl -fsSL https://github.com/emeieiron/femp/releases/latest/download/installer.sh | sh
 #
 # Options, passed as `sh -s -- <options>` when piping:
 #   --yes             install a missing C compiler without asking
 #   --no-modify-path  do not add femp to PATH in shell startup files
-#   --skip-deps       install femp and Fe only
+#   --skip-deps       install femp and Z3 only
 #
 # Environment:
 #   FEMP_HOME          where to install (default: ~/.femp)
@@ -151,12 +151,7 @@ install_femp() {
     unpacked="$work/femp-$target"
     [ -x "$unpacked/bin/femp" ] || fail "$archive does not contain bin/femp"
 
-    mkdir -p "$FEMP_HOME/bin" "$FEMP_HOME/toolchains" "$FEMP_HOME/licenses"
-    for toolchain in "$unpacked"/toolchains/*; do
-        [ -d "$toolchain" ] || continue
-        rm -rf "$FEMP_HOME/toolchains/$(basename "$toolchain")"
-        cp -R "$toolchain" "$FEMP_HOME/toolchains/"
-    done
+    mkdir -p "$FEMP_HOME/bin" "$FEMP_HOME/licenses"
     cp "$unpacked"/LICENSE* "$FEMP_HOME/licenses/" 2>/dev/null || true
     install_z3
     # Replaced last, so that a failed install leaves a working femp alone.
@@ -354,13 +349,13 @@ modify_path() {
 
 usage() {
     cat <<'USAGE'
-Installs femp, the Fe compiler and Z3, and Node.js and a C compiler when missing.
+Installs femp, with its Fe compiler, and Z3, and Node.js and a C compiler when missing.
 
 Usage: installer.sh [--yes] [--no-modify-path] [--skip-deps]
 
   --yes             install a missing C compiler without asking
   --no-modify-path  do not add femp to PATH in shell startup files
-  --skip-deps       install femp and Fe only
+  --skip-deps       install femp and Z3 only
 
 Environment: FEMP_HOME, FEMP_VERSION, FEMP_DOWNLOAD_URL, FEMP_NODE_MIRROR
 USAGE

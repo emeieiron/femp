@@ -1,5 +1,5 @@
-# Builds femp and the Fe compiler for every supported host, packs them with a
-# pinned Z3 build, and publishes them, with the installer, as a GitHub
+# Builds femp, which links the Fe compiler, for every supported host, packs it
+# with a pinned Z3 build, and publishes it, with the installer, as a GitHub
 # release. Runs when a `v*` tag is pushed.
 name: Release
 
@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  # Building Fe needs Rust 1.97 or newer; femp needs 1.96.
+  # The Fe compiler crates femp links need Rust 1.97 or newer.
   RUST_TOOLCHAIN: "1.98.0"
   TAG: ${{ inputs.tag || github.ref_name }}
 
@@ -45,9 +45,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - name: Install Rust
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "${{ matrix.target }}"

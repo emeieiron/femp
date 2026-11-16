@@ -182,5 +182,3 @@ package manager.
   storage, mutable borrows, raw pointers, strings and recursion are reported as not supported.
 - Machines whose methods use effects, such as contract machines, are not supported yet.
 - Differentials count any two panics as agreeing, whatever their reasons.
-- The prover links the Fe 26.6.0 front end; a project pinned to another Fe release is proved
-  with that one, with a warning.

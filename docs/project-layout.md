@@ -10,7 +10,7 @@ name = "vesting"
 version = "0.1.0"
 
 [toolchain]
-fe = "26.6.0"            # optional; this is the default
+fe = "26.6.0"            # optional; must be the release femp is built with
 
 [modules.core]           # no platform: a shared module
 path = "shared"
@@ -181,11 +181,6 @@ Parameters and results may be `bool`, integers of up to 64 bits, text in
 (`std::wasm::HostText`) and a tagged reply out (`std::wasm::Reply`). In the bindings, 64-bit
 integers are `bigint` and narrower ones `number`.
 
-Fe 26.6 compiles a single file to WebAssembly. FeMP checks the original ingot with Fe and
-then bundles its dependencies into `build/wasm/<module>/stage/<ingot name>.fe` for builds.
-The bundler follows ingot paths, workspace dependencies, and pinned Git dependencies
-materialized by the Fe compiler. Declare library dependencies in `fe.toml`. The FeMP
-manifest lists application modules and generator configurations.
-
-`femp check` also checks the bundled WASM source for platform entry points. `femp test`
-runs the Fe tests in ingot context.
+The module is compiled as an ingot, with its dependencies, into one WebAssembly module.
+Declare library dependencies in `fe.toml`; the FeMP manifest lists application modules and
+generator configurations.
