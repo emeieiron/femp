@@ -196,3 +196,18 @@ fn claiming_more_than_vested_reverts() uses (evm: mut Evm) {
 fn invalid_schedules_cannot_be_deployed() uses (evm: mut Evm) {
     evm.create2<Vesting>(value: Wei::zero(), args: (0, 0, 0, 1), salt: 3)
 }
+
+/// The contract never pays out more than the schedule's total.
+#[invariant]
+fn claims_stay_within_total(store: VestingStore) -> bool {
+    store.claimed <= store.total
+}
+
+/// Deployment accepts only a valid schedule, and no message changes it.
+#[invariant]
+fn schedule_stays_valid(store: VestingStore) -> bool {
+    store.total > 0
+        && store.duration > 0
+        && store.cliff <= store.duration
+        && (store.start as u256) + (store.duration as u256) <= (u64::max() as u256)
+}

@@ -3,7 +3,8 @@
 `femp prove` proves the claims of a FeMP project for **all** inputs, where `femp prop` checks
 them for many generated ones. It reads the same declarations: a `#[property]`, `#[machine]`
 or `#[differential]` is written once, then tested by `femp prop` and proved by `femp prove`.
-`#[spec]` functions add what a function promises, for every input it accepts.
+`#[spec]` functions add what a function promises, for every input it accepts, and a contract's
+`#[invariant]`s what its storage keeps after every message.
 
 > Test it with generated inputs. Prove it for all of them. Replay every counterexample.
 
@@ -28,6 +29,7 @@ REFUTED     core::halves_stay_small           returns false
 | `#[differential]` | Every target computes the same outcome. Targets that lower to the same code agree by construction; code that differs under `#[cfg(target = ..)]` is compared side by side: both sides return the same value, or both panic. |
 | `#[machine]` | By induction: `#[init]` establishes every `#[invariant]`, and each `#[command]`, from any state on which the invariants hold, keeps them. Nothing panics, observations included. |
 | `#[spec]` | For every input its `requires` allow, its target returns without panicking and its `ensures` hold. |
+| Contract `#[invariant]` | By induction over messages: the storage `init` leaves satisfies every invariant, and each `recv` arm, from any storage that satisfies them, leaves storage that does. A transaction that reverts changes nothing. |
 
 A panic is any way the code stops abnormally: checked arithmetic that leaves its type,
 division by zero, a signed `MIN / -1`, an index past the end of an array, a failed `assert`,
@@ -101,6 +103,59 @@ primitive parameters and result is also run by `femp prop`: a case its `requires
 discarded, and a failed `ensures` or any panic fails it. WebAssembly traps alike when a spec
 rejects a case and when it fails, so specs run on the EVM and natively only.
 
+## Contracts
+
+An `#[invariant]` outside a `#[machine]` describes a contract's storage. It is a function of
+the contract's fields, which its parameters name, and returns `bool`:
+
+```fe
+pub contract Vesting uses (ctx: Ctx, log: mut Log) {
+    mut store: VestingStore,
+    ...
+}
+
+/// The contract never pays out more than the schedule's total.
+#[invariant]
+fn claims_stay_within_total(store: VestingStore) -> bool {
+    store.claimed <= store.total
+}
+```
+
+When a module declares several contracts, `#[invariant(contract = "Name")]` says which one.
+The contract is proved as a machine whose state is its storage:
+
+- A new contract's storage is zero: `0`, `false` and an enum's first variant. `init` runs on it
+  with any arguments.
+- Each `recv` arm runs with any message, from any storage the invariants allow.
+- Anything that stops a handler, a panic or `revert`, `revert_error`, `revert_bytes` or
+  `revert_empty`, undoes its transaction, so it cannot break an invariant.
+- The block and transaction context `Ctx` reads (`ctx.timestamp`, `ctx.caller`, `ctx.value`
+  and the rest) is any value, chosen per transaction; `ctx.value` is zero for a handler that is
+  not `#[payable]`. Reads that change during a transaction, such as `gas` or another account's
+  balance, are any value at each read.
+- `log.emit` leaves storage alone.
+
+If induction fails, a bounded search from deployment looks for a sequence of up to `--steps`
+messages, in which block time and number never decrease. A sequence it finds refutes the
+contract:
+
+```
+REFUTED     contracts::Vesting  invariant `claims_stay_within_total` fails after step 1
+            init(total = 1, start = 0, cliff = 0, duration = 1)
+            1. Claim(ctx.timestamp = 1, amount = 1)
+            evm accepts every transaction
+```
+
+The sequence is then sent to the compiled contract in an in-process EVM: it is deployed with
+the `init` arguments, and each message is sent with the selector and the context the search
+chose. Every transaction of a refuting sequence goes through in the proof, so a transaction the
+EVM rejects means the proof's model and the contract disagree, which fails the run. The EVM
+does not expose storage, so the replay confirms that the transactions go through, not the broken
+invariant itself.
+
+Contract invariants are proved only. `femp prop` tests contracts through `#[machine]`s that
+deploy them and send them messages.
+
 ## Loops
 
 A loop with `invariant(..)` as the first statement of its body is proved by induction: the
@@ -131,7 +186,7 @@ runs. A `for` loop over an array of up to `--unroll` elements needs no invariant
 femp prove                    # every claim on every platform
 femp prove -f vest            # claims whose name contains `vest`
 femp prove -t evm             # one platform's programs only
-femp prove --list             # the claims, as `femp prop --list` shows them, plus every spec
+femp prove --list             # the claims, as `femp prop --list` shows them, plus every spec and contract
 femp prove --dump-vir --keep-smt   # keep what the prover saw under build/prove
 ```
 
@@ -158,7 +213,7 @@ supported. Reports contain no timings, so equal runs give equal reports.
 | --- | --- |
 | `PROVED` | The claim holds for every input, on the targets listed. |
 | `REFUTED` | A counterexample breaks it. It was minimized toward the simplest inputs, in the order `femp prop` shrinks to, then run on the compiled targets and saved under `regressions/`. |
-| `UNKNOWN` | The solver ran out of time, a loop may run longer than it was unrolled, a spec's `requires` may not hold where it stands in, or a machine is not inductive. The reason says which. |
+| `UNKNOWN` | The solver ran out of time, a loop may run longer than it was unrolled, a spec's `requires` may not hold where it stands in, or a machine or contract is not inductive. The reason says which. |
 | `UNSUPPORTED` | The claim reaches code the prover has no model for, such as effects, storage, mutable borrows or recursion. The location is reported. |
 | `SKIPPED` | A trusted spec, which is assumed rather than proved. |
 
@@ -178,7 +233,14 @@ package manager.
 
 ## Limits
 
-- Pure code only: integers, `bool`, structs, enums, tuples and arrays. Effects, contract
-  storage, mutable borrows, raw pointers, strings and recursion are reported as not supported.
-- Machines whose methods use effects, such as contract machines, are not supported yet.
+- Values are integers, `bool`, structs, enums, tuples and arrays. Mutable borrows, raw
+  pointers, strings and recursion are reported as not supported.
+- Effects are modeled where a contract provides them: its storage, the EVM context, and values
+  bound with `with`. Only `init` and `recv` arms may write storage.
+- A contract's messages and `init` may take only integers and `bool`. Storage maps, calls to
+  other contracts, creating contracts and raw storage access are not supported yet.
+- A replayed sequence cannot choose `ctx.address`, `ctx.origin`, `ctx.selfbalance` or
+  `ctx.blobbasefee`, which the EVM decides.
+- Machines whose methods use effects, such as machines that deploy contracts, are not
+  supported yet.
 - Differentials count any two panics as agreeing, whatever their reasons.

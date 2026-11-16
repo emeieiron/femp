@@ -112,8 +112,17 @@ PROVED      core::VestingModel                    on evm, native, wasm
 PROVED      core::vested_at_spec                  on evm, native, wasm
 PROVED      core::claim_spec                      on evm, native, wasm
 
-10 proved, 0 refuted, 0 unknown, 1 not supported (evm, native, wasm)
+11 proved, 0 refuted, 0 unknown, 1 not supported (evm, native, wasm)
 ```
 
-`VestingContractMachine` drives the deployed contract through effects, which the prover does
-not model yet. See [proving](../../docs/proving.md).
+The `Vesting` contract's storage is proved too. Its two `#[invariant]`s in `evm/src/lib.fe`
+hold after deployment and after every message: claims never pass the total, and the schedule
+stays as valid as deployment requires. A claim that reverts changes nothing, so only the
+transactions that go through are checked:
+
+```
+PROVED      contracts::Vesting                    on evm
+```
+
+`VestingContractMachine` deploys the contract and calls it through effects, which the prover
+does not model yet. See [proving](../../docs/proving.md).
