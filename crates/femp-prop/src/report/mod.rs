@@ -5,6 +5,7 @@ mod text;
 
 use serde::{Deserialize, Serialize};
 
+pub use femp_spec::counterexample::{Arg, Counterexample, StepReport};
 pub use text::render;
 
 use crate::verdict::FailureKind;
@@ -112,33 +113,6 @@ impl From<FailureKind> for FailureKindName {
             FailureKind::Diverged => Self::Diverged,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Arg {
-    pub name: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StepReport {
-    pub command: String,
-    pub args: Vec<Arg>,
-    /// Seconds the block clock advanced before the step.
-    pub advance: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "shape", rename_all = "lowercase")]
-pub enum Counterexample {
-    Args {
-        args: Vec<Arg>,
-    },
-    Sequence {
-        init: String,
-        init_args: Vec<Arg>,
-        steps: Vec<StepReport>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

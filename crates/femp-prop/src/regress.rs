@@ -100,8 +100,10 @@ impl Store {
         Ok(&self.loaded[&key])
     }
 
-    /// Adds a regression unless one with the same tape is already stored,
-    /// and returns the file it lives in, relative to the project root.
+    /// Adds a regression unless one with the same tape and counterexample is
+    /// already stored, and returns the file it lives in, relative to the
+    /// project root. Regressions a proof found carry no tape, so the
+    /// counterexample tells them apart.
     pub fn save(&mut self, module: &str, entry: &str, regression: Regression) -> Result<PathBuf> {
         self.load(module, entry)?;
         let path = self.path(module, entry);
@@ -110,10 +112,10 @@ impl Store {
             .get_mut(&(module.to_string(), entry.to_string()))
             .expect("loaded above");
         let relative = Path::new(DIR).join(module).join(format!("{entry}.json"));
-        if stored
-            .iter()
-            .any(|existing| existing.choices == regression.choices)
-        {
+        if stored.iter().any(|existing| {
+            existing.choices == regression.choices
+                && existing.counterexample == regression.counterexample
+        }) {
             return Ok(relative);
         }
         stored.push(regression);
@@ -130,6 +132,10 @@ mod tests {
     use crate::report::Arg;
 
     fn regression(choices: &[&str]) -> Regression {
+        found(choices, "1000")
+    }
+
+    fn found(choices: &[&str], x: &str) -> Regression {
         Regression {
             failure: FailureKindName::Diverged,
             seed: "0x1".to_string(),
@@ -138,7 +144,7 @@ mod tests {
             counterexample: Counterexample::Args {
                 args: vec![Arg {
                     name: "x".into(),
-                    value: "1000".into(),
+                    value: x.into(),
                 }],
             },
             outcomes: vec![TargetOutcome {
@@ -164,6 +170,16 @@ mod tests {
         let loaded = reopened.load("core", "p").unwrap();
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].tape(), Some(vec![U256::from(1000u16)]));
+    }
+
+    #[test]
+    fn tapeless_regressions_are_told_apart_by_their_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path());
+        store.save("core", "p", found(&[], "250")).unwrap();
+        store.save("core", "p", found(&[], "250")).unwrap();
+        store.save("core", "p", found(&[], "7")).unwrap();
+        assert_eq!(store.load("core", "p").unwrap().len(), 2);
     }
 
     #[test]

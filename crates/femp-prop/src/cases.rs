@@ -5,7 +5,7 @@ use femp_core::property::{Machine, Param, Property, Sequence, Step, Ty, U256, Va
 
 use crate::choices::Choices;
 use crate::generators::{Registry, Shared};
-use crate::spec::{self, Spec};
+use femp_spec::domain::{self as spec, Spec};
 
 const STEP_SPAN: &str = "step";
 

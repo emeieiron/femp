@@ -9,12 +9,12 @@ use femp_core::platform::Platform;
 use femp_core::project::{BUILD_DIR, Module, Project};
 use femp_core::property::{Executor, HarnessRequest, Suite};
 use femp_prop::compare;
-use femp_prop::discover::discover;
 use femp_prop::engine::{Config, Engine, Target, format_seed};
 use femp_prop::generators::Registry;
 use femp_prop::regress::Store;
 use femp_prop::report::{self, RunReport};
 use femp_prop::rng::derive;
+use femp_spec::discover;
 
 use crate::cli::PropArgs;
 use crate::console;
@@ -180,7 +180,8 @@ fn discover_all<'a>(
                 })
                 .collect::<Vec<_>>()
         }) {
-            Ok(mut suite) => {
+            Ok(claims) => {
+                let mut suite = claims.suite;
                 relativize(&mut suite, &project.root);
                 if let Some(pattern) = filter {
                     suite
