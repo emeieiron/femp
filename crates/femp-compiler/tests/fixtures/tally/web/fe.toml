@@ -1,0 +1,7 @@
+[ingot]
+name = "tally_web"
+version = "0.1.0"
+target = "wasm"
+
+[dependencies]
+tally_core = "../core"

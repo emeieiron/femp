@@ -22,7 +22,6 @@ const ENTRIES_FILE: &str = "entries.json";
 pub fn start(
     cx: &Context<'_>,
     platform: &PlatformId,
-    backend: &str,
     request: &HarnessRequest<'_>,
 ) -> Result<Box<dyn Executor>> {
     let suite = request.suite;
@@ -38,14 +37,7 @@ pub fn start(
         },
     )?;
     let out_dir = request.out_dir.join("bin");
-    let mut project = cx.project.clone();
-    project.modules.push(module.clone());
-    let staged = Context {
-        project: &project,
-        environment: cx.environment,
-        optimize: cx.optimize,
-    };
-    let built = build::build(&staged, backend, &module, &out_dir)?;
+    let built = build::build(cx, &module, &out_dir)?;
     let path_of = |kind| {
         of_kind(&built, kind)
             .next()

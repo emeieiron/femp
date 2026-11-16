@@ -1,0 +1,114 @@
+{
+  "compiler": {
+    "commit": "5b3f96a",
+    "version": "26.6.0"
+  },
+  "language": "Fe",
+  "output": {
+    "abi": [
+      {
+        "inputs": [
+          {
+            "name": "start",
+            "type": "uint64"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+      },
+      {
+        "inputs": [
+          {
+            "name": "amount",
+            "type": "uint64"
+          }
+        ],
+        "name": "add",
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint64"
+          }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [],
+        "name": "total",
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint64"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": false,
+            "name": "amount",
+            "type": "uint64"
+          },
+          {
+            "indexed": false,
+            "name": "total",
+            "type": "uint64"
+          }
+        ],
+        "name": "Added",
+        "type": "event"
+      }
+    ]
+  },
+  "settings": {
+    "arithmetic": "checked",
+    "compilationTarget": {
+      "src/lib.fe": "Tally"
+    },
+    "dependencyArithmetic": "defer",
+    "evmVersion": "osaka",
+    "ingots": [
+      {
+        "arithmetic": "checked",
+        "dependencies": {
+          "core": "core",
+          "std": "std",
+          "tally_core": "tally_core"
+        },
+        "dependencyArithmetic": "defer",
+        "name": "tally_contract",
+        "namespace": "",
+        "version": "0.1.0"
+      },
+      {
+        "arithmetic": "checked",
+        "dependencies": {
+          "core": "core",
+          "std": "std"
+        },
+        "dependencyArithmetic": "defer",
+        "name": "tally_core",
+        "namespace": "tally_core",
+        "version": "0.1.0"
+      }
+    ],
+    "optimizer": {
+      "level": "1"
+    }
+  },
+  "sources": {
+    "src/lib.fe": {
+      "content": "use std::evm::{Evm, Log}\nuse tally_core::add\n\nmsg TallyMsg {\n    #[selector = sol(\"add(uint64)\")]\n    Add { amount: u64 } -> u64,\n    #[selector = sol(\"total()\")]\n    Total -> u64,\n}\n\n#[event]\npub struct Added { pub amount: u64, pub total: u64 }\n\nstruct TallyStore { total: u64 }\n\npub contract Tally uses (log: mut Log) {\n    mut store: TallyStore,\n\n    init(start: u64) uses (mut store) { store.total = start }\n\n    recv TallyMsg {\n        Add { amount } -> u64 uses (mut store, mut log) {\n            store.total = add(store.total, amount)\n            log.emit(Added { amount, total: store.total })\n            store.total\n        }\n\n        Total -> u64 uses (store) {\n            store.total\n        }\n    }\n}\n",
+      "keccak256": "0xbfc607c2de1124c56fd9b7c04af5561e8ea1424a845ef28007b6f8808e6c43d8"
+    },
+    "tally_core/src/lib.fe": {
+      "content": "pub fn add(_ total: u64, _ amount: u64) -> u64 {\n    total + amount\n}\n\n#[test]\nfn adds() {\n    let total: u64 = add(2, 3)\n    assert(total == 5)\n}\n\n#[test]\nfn overflows() {\n    let total: u64 = add(18446744073709551615, 1)\n    assert(total == 0)\n}\n\n#[test(should_revert)]\nfn reverts_on_overflow() {\n    let _ = add(18446744073709551615, 1)\n}\n",
+      "keccak256": "0x34dfb1269396030aced8673f7061530d49a9ff3bfb0f97e4dd390fcfe908d133"
+    }
+  },
+  "version": 1
+}

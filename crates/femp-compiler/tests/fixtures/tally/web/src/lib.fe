@@ -1,0 +1,5 @@
+use tally_core::add
+
+pub fn total(start: u64, amount: u64) -> u64 {
+    add(start, amount)
+}

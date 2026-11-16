@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use femp_compiler::{Root, Session, Target};
 use femp_core::ingot::IngotManifest;
 use femp_core::project::{Module, ModuleRole};
 use femp_core::property::{PanicKind, Property};
-use femp_frontend::{Loaded, Root};
 use femp_prove::obligation::property;
 use femp_prove::{Config, Dumps, Task, Verdict, passes, vc};
 use femp_vir::Check;
@@ -32,7 +32,8 @@ fn properties() -> Vec<Property> {
 
 fn tasks(target: &str) -> Vec<(Property, Task)> {
     let properties = properties();
-    let loaded = Loaded::open(&fixture(), target).unwrap_or_else(|error| panic!("{error}"));
+    let loaded = Session::open(&fixture(), Target::parse(target).expect("a known target"))
+        .unwrap_or_else(|error| panic!("{error}"));
     let roots: Vec<Root> = properties
         .iter()
         .map(|p| Root::function(&p.path, &p.name))

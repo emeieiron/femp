@@ -18,7 +18,6 @@ pub use render::render;
 pub fn start(
     cx: &Context<'_>,
     platform: &PlatformId,
-    backend: &str,
     request: &HarnessRequest<'_>,
 ) -> Result<Box<dyn Executor>> {
     let suite = request.suite;
@@ -33,7 +32,7 @@ pub fn start(
             source: render(suite),
         },
     )?;
-    let built = build::build(cx, backend, &module, &request.out_dir.join("bin"))?;
+    let built = build::build(cx, &module, &request.out_dir.join("bin"))?;
     let executable = of_kind(&built, EXECUTABLE)
         .next()
         .map(|artifact| artifact.path.clone())

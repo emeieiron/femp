@@ -33,6 +33,13 @@ pub enum Error {
     #[error("`{command}` failed\n{output}")]
     Command { command: String, output: String },
 
+    /// The compiler's errors, formatted as it prints them.
+    #[error("the Fe compiler reported errors:\n{output}")]
+    Rejected { output: String },
+
+    #[error("compiler: {0}")]
+    Compiler(String),
+
     #[error("{0}")]
     Artifact(String),
 }

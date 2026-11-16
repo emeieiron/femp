@@ -1,0 +1,39 @@
+{
+  "manifest_version": 1,
+  "module": {
+    "file": "tally_web.wasm",
+    "sha256": "a157dbee37a9d2648194f68bc10c82020690440077c0600d619678a0beba5c74",
+    "size": 117,
+    "initial_memory_pages": 1
+  },
+  "contract_version": 1,
+  "optimization": "1",
+  "compiler": "fe 26.6.0 (5b3f96a)",
+  "imports": [],
+  "exports": [
+    {
+      "name": "memory",
+      "kind": "memory"
+    },
+    {
+      "name": "total",
+      "kind": "function",
+      "params": [
+        {
+          "name": "start",
+          "type": "u64",
+          "wasm": ["i64"]
+        },
+        {
+          "name": "amount",
+          "type": "u64",
+          "wasm": ["i64"]
+        }
+      ],
+      "result": {
+        "type": "u64",
+        "wasm": ["i64"]
+      }
+    }
+  ]
+}

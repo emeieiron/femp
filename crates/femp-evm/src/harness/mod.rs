@@ -19,7 +19,6 @@ pub use exec::EvmExecutor;
 pub fn start(
     cx: &Context<'_>,
     platform: &PlatformId,
-    backend: &str,
     request: &HarnessRequest<'_>,
 ) -> Result<Box<dyn Executor>> {
     let suite = request.suite;
@@ -34,7 +33,7 @@ pub fn start(
             source: render::render(suite),
         },
     )?;
-    let built = build::build(cx, backend, &module, &request.out_dir.join("bin"))?;
+    let built = build::build(cx, &module, &request.out_dir.join("bin"))?;
     let bytecode = of_kind(&built, BYTECODE)
         .find(|artifact| contract_of(artifact) == render::CONTRACT)
         .ok_or_else(|| Error::Artifact("the EVM harness build produced no bytecode".to_string()))?;

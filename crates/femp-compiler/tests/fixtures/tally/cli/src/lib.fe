@@ -1,0 +1,22 @@
+use core::text::parse_uint
+use std::env::Args
+use std::io::Stdout
+use tally_core::add
+
+pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
+    var total: u64 = 0
+    var index: usize = 1
+    while index < args.count() {
+        match parse_uint(args.get(index)) {
+            Option::Some(amount) => {
+                total = add(total, amount.downcast_truncate())
+            },
+            Option::None => {
+                return 64
+            },
+        }
+        index = index + 1
+    }
+    println!(total)
+    0
+}

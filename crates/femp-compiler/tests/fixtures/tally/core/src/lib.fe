@@ -1,0 +1,20 @@
+pub fn add(_ total: u64, _ amount: u64) -> u64 {
+    total + amount
+}
+
+#[test]
+fn adds() {
+    let total: u64 = add(2, 3)
+    assert(total == 5)
+}
+
+#[test]
+fn overflows() {
+    let total: u64 = add(18446744073709551615, 1)
+    assert(total == 0)
+}
+
+#[test(should_revert)]
+fn reverts_on_overflow() {
+    let _ = add(18446744073709551615, 1)
+}
