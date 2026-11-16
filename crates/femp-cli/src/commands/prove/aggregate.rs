@@ -1,16 +1,21 @@
-//! Combines the verdicts of a claim's tasks into its report: refuted if any
-//! target's program is refuted, unknown if any is undecided, not supported
-//! if any cannot be modeled, and proved only when every one is.
+//! Combines the verdicts of a claim's tasks into its report. A property is
+//! refuted if any target's program is, unknown if any is undecided, not
+//! supported if any cannot be modeled, and proved only when every one is.
+//! A machine is refuted by its initializer or by a search that found a
+//! sequence; an induction step that fails without such a sequence leaves
+//! it unknown, with the state that breaks the step.
 
 use std::path::{Path, PathBuf};
 
 use femp_core::project::{Module, Project};
+use femp_core::property::{Machine, Param, Sequence, Value};
+use femp_prove::obligation::machine;
 use femp_prove::report::{ClaimReport, ClaimStatus, Refuted};
 use femp_prove::{Refutation, Verdict};
-use femp_spec::{Arg, Counterexample};
+use femp_spec::{Arg, Claims, Counterexample, StepReport};
 use femp_vir::{Check, Span};
 
-use super::plan::{ClaimPlan, Pending};
+use super::plan::{ClaimPlan, Done, Entry, Pending, Role};
 
 /// Shows source positions relative to the project, as the user wrote them.
 pub struct Places {
@@ -29,6 +34,20 @@ impl Places {
                 .map(|module: &Module| (canonical(&module.dir), module.source_dir.clone()))
                 .collect(),
         }
+    }
+
+    /// `text` with the absolute source paths in it shown as `show` would.
+    pub fn relativize(&self, text: &str) -> String {
+        let mut text = text.to_string();
+        for (dir, source) in &self.modules {
+            let source = source.canonicalize().unwrap_or_else(|_| source.clone());
+            let shown = source.strip_prefix(&self.root).unwrap_or(&source);
+            text = text.replace(
+                &format!("{}/", dir.display()),
+                &format!("{}/", shown.display()),
+            );
+        }
+        text.replace(&format!("{}/", self.root.display()), "")
     }
 
     pub fn show(&self, span: &Span) -> String {
@@ -53,72 +72,81 @@ impl Places {
     }
 }
 
-/// The claim's report, and the refutation its counterexample came from.
-pub fn report(plan: &ClaimPlan, places: &Places) -> (ClaimReport, Option<Refutation>) {
-    let mut targets = Vec::new();
-    let mut refuted: Option<(&Refutation, Vec<String>)> = None;
-    let mut unknown: Option<String> = None;
-    let mut unsupported: Option<(String, String)> = None;
-    for pending in &plan.results {
-        let Pending::Done {
-            targets: on,
-            verdict,
-        } = pending
-        else {
-            continue;
-        };
-        for target in on {
+/// What to run on the compiled targets to confirm a refutation.
+#[derive(Debug, Clone)]
+pub enum ReplayCase {
+    Args(Vec<Value>),
+    Sequence(Sequence),
+}
+
+fn done(plan: &ClaimPlan) -> impl Iterator<Item = &Done> {
+    plan.results.iter().filter_map(|pending| match pending {
+        Pending::Done(done) => Some(done),
+        Pending::Job(_) => None,
+    })
+}
+
+fn refuted(plan: &ClaimPlan, wanted: impl Fn(Role) -> bool) -> Option<(&Done, &Refutation)> {
+    done(plan)
+        .filter(|done| wanted(done.role))
+        .find_map(|done| match &done.verdict {
+            Verdict::Refuted(refutation) => Some((done, refutation)),
+            _ => None,
+        })
+}
+
+pub fn report(
+    plan: &ClaimPlan,
+    claims: &Claims,
+    places: &Places,
+) -> (ClaimReport, Option<ReplayCase>) {
+    let mut targets: Vec<String> = Vec::new();
+    for done in done(plan) {
+        for target in &done.targets {
             if !targets.contains(target) {
                 targets.push(target.clone());
             }
         }
-        match verdict {
-            Verdict::Proved => {}
-            Verdict::Refuted(refutation) => {
-                if refuted.is_none() {
-                    refuted = Some((refutation, on.clone()));
-                }
-            }
-            Verdict::Unknown(reason) => {
-                unknown.get_or_insert_with(|| reason.clone());
-            }
-            Verdict::NotSupported(error) => {
-                unsupported
-                    .get_or_insert_with(|| (places.show(&error.span), error.message.clone()));
-            }
-        }
     }
-    let found = refuted
-        .as_ref()
-        .map(|(refutation, _)| (*refutation).clone());
-    let status = if let Some((refutation, on)) = refuted {
-        ClaimStatus::Refuted(Box::new(Refuted {
-            failure: failure(&refutation.check, &refutation.span, places),
-            counterexample: Counterexample::Args {
-                args: refutation
-                    .shown
-                    .iter()
-                    .map(|(name, value)| Arg {
-                        name: name.clone(),
-                        value: value.clone(),
-                    })
-                    .collect(),
-            },
-            refuted_on: on,
-            replay: Vec::new(),
-            saved_to: None,
-        }))
-    } else if let Some(reason) = unknown {
-        ClaimStatus::Unknown { reason }
-    } else if let Some((location, reason)) = unsupported {
-        ClaimStatus::NotSupported { location, reason }
-    } else if plan.results.is_empty() {
-        ClaimStatus::Skipped {
-            reason: "the prover does not handle this kind of claim yet".to_string(),
+    let unknown = done(plan).find_map(|done| match &done.verdict {
+        Verdict::Unknown(reason) => Some(places.relativize(reason)),
+        _ => None,
+    });
+    let unsupported = done(plan).find_map(|done| match &done.verdict {
+        Verdict::NotSupported(error) => Some((places.show(&error.span), error.message.clone())),
+        _ => None,
+    });
+    let (status, replay) = match plan.entry {
+        Entry::Machine(index) => machine_status(plan, &claims.suite.machines[index], places),
+        Entry::Property(index) => {
+            let params = &claims.suite.properties[index].params;
+            match refuted(plan, |_| true) {
+                Some((done, refutation)) => (
+                    Some(refuted_status(
+                        failure(&refutation.check, &refutation.span, places),
+                        args_counterexample(refutation),
+                        done.targets.clone(),
+                    )),
+                    Some(ReplayCase::Args(primitive_args(params, refutation))),
+                ),
+                None => (None, None),
+            }
         }
-    } else {
-        ClaimStatus::Proved
+        Entry::Contract(_) => (None, None),
     };
+    let status = status.unwrap_or_else(|| {
+        if let Some(reason) = unknown {
+            ClaimStatus::Unknown { reason }
+        } else if let Some((location, reason)) = unsupported {
+            ClaimStatus::NotSupported { location, reason }
+        } else if plan.results.is_empty() {
+            ClaimStatus::Skipped {
+                reason: "the prover does not handle this kind of claim yet".to_string(),
+            }
+        } else {
+            ClaimStatus::Proved
+        }
+    });
     let report = ClaimReport {
         module: plan.module.clone(),
         name: plan.name.clone(),
@@ -129,7 +157,135 @@ pub fn report(plan: &ClaimPlan, places: &Places) -> (ClaimReport, Option<Refutat
         notes: Vec::new(),
         status,
     };
-    (report, found)
+    (report, replay)
+}
+
+fn refuted_status(failure: String, counterexample: Counterexample, on: Vec<String>) -> ClaimStatus {
+    ClaimStatus::Refuted(Box::new(Refuted {
+        failure,
+        counterexample,
+        refuted_on: on,
+        replay: Vec::new(),
+        saved_to: None,
+    }))
+}
+
+fn args_counterexample(refutation: &Refutation) -> Counterexample {
+    Counterexample::Args {
+        args: refutation
+            .shown
+            .iter()
+            .map(|(name, value)| Arg {
+                name: name.clone(),
+                value: value.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn primitive_args(params: &[Param], refutation: &Refutation) -> Vec<Value> {
+    refutation
+        .values
+        .iter()
+        .take(params.len())
+        .copied()
+        .collect()
+}
+
+fn args(params: &[Param], values: &[Value]) -> Vec<Arg> {
+    params
+        .iter()
+        .zip(values)
+        .map(|(param, value)| Arg {
+            name: param.name.clone(),
+            value: value.to_string(),
+        })
+        .collect()
+}
+
+fn sequence_counterexample(machine: &Machine, sequence: &Sequence) -> Counterexample {
+    Counterexample::Sequence {
+        init: machine.init.name.clone(),
+        init_args: args(&machine.init.params, &sequence.init),
+        steps: sequence
+            .steps
+            .iter()
+            .map(|step| {
+                let method = &machine.commands[step.command].method;
+                StepReport {
+                    command: method.name.clone(),
+                    args: args(&method.params, &step.args),
+                    advance: step.advance,
+                }
+            })
+            .collect(),
+    }
+}
+
+fn machine_status(
+    plan: &ClaimPlan,
+    machine: &Machine,
+    places: &Places,
+) -> (Option<ClaimStatus>, Option<ReplayCase>) {
+    let found = refuted(plan, |role| role == Role::Init)
+        .map(|(done, refutation)| (done, refutation, 0))
+        .or_else(|| {
+            refuted(plan, |role| role == Role::Search)
+                .map(|(done, refutation)| (done, refutation, done.index + 1))
+        });
+    if let Some((done, refutation, steps)) = found
+        && let Some(sequence) = machine::decode(machine, steps, &refutation.values)
+    {
+        let status = refuted_status(
+            failure(&refutation.check, &refutation.span, places),
+            sequence_counterexample(machine, &sequence),
+            done.targets.clone(),
+        );
+        return (Some(status), Some(ReplayCase::Sequence(sequence)));
+    }
+    let step = refuted(plan, |role| matches!(role, Role::Step(_)));
+    let Some((done, refutation)) = step else {
+        return (None, None);
+    };
+    let Role::Step(command) = done.role else {
+        return (None, None);
+    };
+    let name = &machine.commands[command].method.name;
+    let what = match &refutation.check {
+        Check::Panic(kind) => {
+            let at = places.show(&refutation.span);
+            format!("`{name}` panics ({kind}) at {at}")
+        }
+        other => other.to_string(),
+    };
+    let mut shown = refutation.shown.iter();
+    let state = shown
+        .next()
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default();
+    let arguments: Vec<String> = shown
+        .map(|(param, value)| format!("{param} = {value}"))
+        .collect();
+    let mut from = format!("from {state}");
+    if !arguments.is_empty() {
+        from.push_str(&format!(", {}", arguments.join(", ")));
+    }
+    let mut reason = format!("{what} {from}");
+    if let Some(steps) = searched(plan) {
+        reason.push_str(&format!(
+            "\nno sequence of up to {steps} commands from `{}` breaks it, so the invariants are not inductive",
+            machine.init.name
+        ));
+    }
+    (Some(ClaimStatus::Unknown { reason }), None)
+}
+
+/// The number of steps the machine's searches covered, if they ran.
+fn searched(plan: &ClaimPlan) -> Option<usize> {
+    done(plan)
+        .filter(|done| done.role == Role::Search)
+        .map(|done| done.index + 1)
+        .max()
 }
 
 pub fn failure(check: &Check, span: &Span, places: &Places) -> String {

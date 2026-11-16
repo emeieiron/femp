@@ -29,6 +29,9 @@ pub trait Solver {
     /// The model's value of each term, after a satisfiable check.
     fn values(&mut self, terms: &[String]) -> Result<Vec<Sexp>, String>;
 
+    /// Forgets everything sent so far, as a new process would.
+    fn reset(&mut self) -> Result<(), String>;
+
     fn push(&mut self) -> Result<(), String> {
         self.send("(push 1)")
     }

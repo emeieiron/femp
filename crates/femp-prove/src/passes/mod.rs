@@ -2,6 +2,7 @@
 //! assumptions and assertions. Each pass sees the whole task and may refuse
 //! code it cannot handle; `--dump-vir` prints the task after each one.
 
+pub mod capture;
 mod checks;
 mod inline;
 mod recursion;
@@ -29,6 +30,14 @@ pub fn standard() -> Vec<Box<dyn Pass>> {
         Box::new(checks::Checks),
         Box::new(simplify::Simplify),
     ]
+}
+
+/// The passes that reduce a function to call-free code with explicit
+/// panics, before it is combined with another.
+pub fn reduction() -> Vec<Box<dyn Pass>> {
+    let mut passes = standard();
+    passes.retain(|pass| pass.name() != "simplify");
+    passes
 }
 
 /// The pass that keeps only what the task's entry reaches, which makes the

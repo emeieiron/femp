@@ -41,8 +41,25 @@ impl Pass for Checks {
                 cursor.assert(never, Check::Panic(kind));
                 cursor.terminate(Terminator::Stop);
             }
+            if function.block(block).assumed {
+                assume_panics_away(function, block);
+            }
         }
         Ok(())
+    }
+}
+
+/// In a block whose panics are assumed not to happen, each panic check
+/// becomes an assumption.
+fn assume_panics_away(function: &mut Function, block: femp_vir::BlockId) {
+    for stmt in &mut function.block_mut(block).stmts {
+        if let StmtKind::Assert {
+            cond,
+            check: Check::Panic(_),
+        } = stmt.kind
+        {
+            stmt.kind = StmtKind::Assume(cond);
+        }
     }
 }
 

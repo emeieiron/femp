@@ -29,6 +29,26 @@ pub fn body(program: &Program) -> String {
         .map_or(text.clone(), |(_, rest)| rest.to_string())
 }
 
+/// The program as text without its target or any source position: equal
+/// for two targets exactly when they lowered to the same code, even when
+/// that code comes from different `#[cfg]` items.
+pub fn fingerprint(program: &Program) -> String {
+    let mut out = types(&program.types);
+    for function in &program.functions {
+        let mut copy = function.clone();
+        copy.span = Default::default();
+        for block in &mut copy.blocks {
+            block.span = Default::default();
+            for stmt in &mut block.stmts {
+                stmt.span = Default::default();
+            }
+        }
+        out.push('\n');
+        out.push_str(&self::function(&program.types, &copy));
+    }
+    out
+}
+
 pub fn types(types: &TypeTable) -> String {
     let mut out = String::new();
     for (index, def) in types.defs.iter().enumerate() {
@@ -91,10 +111,11 @@ pub fn function(types: &TypeTable, function: &Function) -> String {
     for id in function.block_ids() {
         let block = function.block(id);
         let params: Vec<String> = block.params.iter().map(|p| printer.typed(*p)).collect();
+        let mode = if block.assumed { " assumed" } else { "" };
         if params.is_empty() {
-            let _ = writeln!(out, "{id}:");
+            let _ = writeln!(out, "{id}{mode}:");
         } else {
-            let _ = writeln!(out, "{id}({}):", params.join(", "));
+            let _ = writeln!(out, "{id}({}){mode}:", params.join(", "));
         }
         for stmt in &block.stmts {
             let _ = writeln!(out, "  {}{}", printer.stmt(stmt), at(&stmt.span));

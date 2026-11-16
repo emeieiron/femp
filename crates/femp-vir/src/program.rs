@@ -217,6 +217,10 @@ pub struct Block {
     pub stmts: Vec<Stmt>,
     pub term: Terminator,
     pub span: Span,
+    /// Panics here are assumed not to happen rather than checked, as when
+    /// an invariant is assumed of an arbitrary state. Code inlined into
+    /// such a block inherits it.
+    pub assumed: bool,
 }
 
 impl Default for Block {
@@ -226,6 +230,7 @@ impl Default for Block {
             stmts: Vec::new(),
             term: Terminator::Unreachable,
             span: Span::default(),
+            assumed: false,
         }
     }
 }

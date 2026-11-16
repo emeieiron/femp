@@ -28,14 +28,17 @@ impl VestingModel {
         }
     }
 
+    /// Time stops at the end of `u64` rather than overflowing, so every
+    /// state the invariants allow has a next one.
     #[command]
     #[gen(seconds = "0..=500")]
     pub fn wait(self, seconds: u64) -> VestingModel {
-        VestingModel {
-            position: self.position,
-            now: self.now + seconds,
-            last_error: self.last_error,
+        let now = if seconds > u64::max() - self.now {
+            u64::max()
+        } else {
+            self.now + seconds
         }
+        VestingModel { position: self.position, now, last_error: self.last_error }
     }
 
     #[command(weight = 2)]
@@ -47,6 +50,17 @@ impl VestingModel {
                 VestingModel { position: self.position, now: self.now, last_error: error.code() }
             },
         }
+    }
+
+    /// What `Schedule::new` checks keeps holding, which the other
+    /// invariants rely on: `vested_at` cannot overflow on such a schedule.
+    #[invariant]
+    pub fn schedule_stays_valid(self) -> bool {
+        let schedule = self.position.schedule
+        schedule.total > 0
+            && schedule.duration > 0
+            && schedule.cliff <= schedule.duration
+            && schedule.start <= u64::max() - schedule.duration
     }
 
     #[invariant]

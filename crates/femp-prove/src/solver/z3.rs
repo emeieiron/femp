@@ -10,6 +10,7 @@ use super::sexp::{self, Sexp};
 use super::{Answer, Solver};
 
 const MARK: &str = "femp-done";
+const OPTIONS: &str = "(set-option :print-success false)\n(set-option :random-seed 0)\n(set-option :smt.random_seed 0)";
 
 pub struct Z3 {
     child: Child,
@@ -33,7 +34,7 @@ impl Z3 {
             input,
             output,
         };
-        solver.send("(set-option :print-success false)\n(set-option :random-seed 0)\n(set-option :smt.random_seed 0)")?;
+        solver.send(OPTIONS)?;
         Ok(solver)
     }
 
@@ -100,6 +101,10 @@ impl Solver for Z3 {
         }
     }
 
+    fn reset(&mut self) -> Result<(), String> {
+        self.send(&format!("(reset)\n{OPTIONS}"))
+    }
+
     fn check(&mut self, timeout: Duration) -> Result<Answer, String> {
         let millis = timeout.as_millis().max(1);
         self.write(&format!("(set-option :timeout {millis})\n(check-sat)"))?;
@@ -120,6 +125,10 @@ impl Solver for Z3 {
                             .map(|text| text.trim_matches('"').to_string())
                     })
                     .unwrap_or(reason);
+                let reason = match reason.as_str() {
+                    "canceled" | "timeout" => "timed out".to_string(),
+                    _ => reason,
+                };
                 Ok(Answer::Unknown(reason))
             }
             other => Err(format!("unexpected answer from the solver: {other}")),

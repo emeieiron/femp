@@ -115,20 +115,37 @@ fn lists_the_claims_property_testing_lists() {
 }
 
 #[test]
-fn the_demonstrator_properties_are_proved() {
+fn the_demonstrator_claims_are_proved() {
     let Some(project) = project(DEMONSTRATOR) else {
         return;
     };
-    let output = femp(project.path(), &["prove", "-f", "vest"]);
+    let output = femp(project.path(), &["prove", "--strict"]);
     let report = stdout(&output);
+    assert!(
+        !output.status.success(),
+        "the contract machine is not supported: {report}"
+    );
     for name in [
         "vested_never_exceeds_total",
         "vesting_never_decreases",
         "vesting_waits_for_the_cliff",
         "vesting_completes_at_the_end",
+        "claims_stay_within_what_vested",
+        "schedule_error",
+        "vested_amount",
+        "VestingModel",
     ] {
         let line = entry(&report, &format!("core::{name}"));
         assert!(line.starts_with("PROVED"), "{report}");
         assert!(line.contains("on evm, native, wasm"), "{line}");
     }
+    let contract = entry(&report, "contracts::VestingContractMachine");
+    assert!(contract.starts_with("UNSUPPORTED"), "{contract}");
+    assert!(contract.contains("at evm/src/machines.fe:"), "{contract}");
+    assert!(
+        report.contains("8 proved, 0 refuted, 0 unknown, 1 not supported"),
+        "{report}"
+    );
+    let lenient = femp(project.path(), &["prove", "-f", "vest"]);
+    assert!(lenient.status.success(), "{}", stdout(&lenient));
 }

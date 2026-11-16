@@ -9,15 +9,16 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use femp_core::platform::Platform;
 use femp_core::project::{BUILD_DIR, Module};
-use femp_core::property::{Executor, HarnessRequest, Outcome, Suite};
+use femp_core::property::{Executor, HarnessRequest, Outcome, Suite, Support, Trace};
 use femp_prop::compare::Normalized;
+use femp_prop::describe::{describe, first_difference};
 use femp_prop::regress::{Recorded, Regression, Store};
 use femp_prop::report::{FailureKindName, TargetOutcome};
-use femp_prop::verdict::judge_property;
-use femp_prove::Refutation;
+use femp_prop::verdict::{judge_machine, judge_property};
 use femp_prove::report::{ClaimReport, ClaimStatus, Replay};
 use femp_spec::Claims;
 
+use super::aggregate::ReplayCase;
 use super::plan::{ClaimPlan, Entry};
 use crate::console;
 use crate::session::BuildInputs;
@@ -38,7 +39,7 @@ pub struct Replayer<'a> {
 pub struct Found<'a> {
     pub plan: &'a ClaimPlan,
     pub report: &'a mut ClaimReport,
-    pub refutation: Refutation,
+    pub case: ReplayCase,
 }
 
 impl Replayer<'_> {
@@ -96,30 +97,61 @@ impl Replayer<'_> {
         store: &mut Store,
         found: Found<'_>,
     ) -> Result<()> {
-        let Entry::Property(index) = found.plan.entry else {
-            return Ok(());
-        };
-        let property = &suite.properties[index];
-        let mut outcomes: Vec<(String, Outcome)> = Vec::new();
-        for (label, executor) in executors.iter_mut() {
-            let support = executor.supports_property(index);
-            if let femp_core::property::Support::No(reason) = support {
-                found
-                    .report
-                    .notes
-                    .push(format!("not replayed on {label}: {reason}"));
-                continue;
+        let (entry_name, judged, outcomes) = match (found.plan.entry, &found.case) {
+            (Entry::Property(index), ReplayCase::Args(values)) => {
+                let property = &suite.properties[index];
+                let mut outcomes: Vec<(String, Outcome)> = Vec::new();
+                for (label, executor) in executors.iter_mut() {
+                    if let Support::No(reason) = executor.supports_property(index) {
+                        found
+                            .report
+                            .notes
+                            .push(format!("not replayed on {label}: {reason}"));
+                        continue;
+                    }
+                    let mut results = executor
+                        .call(index, std::slice::from_ref(values))
+                        .with_context(|| format!("cannot replay `{}` on {label}", property.name))?;
+                    outcomes.push((label.clone(), results.remove(0)));
+                }
+                let plain: Vec<Outcome> = outcomes
+                    .iter()
+                    .map(|(_, outcome)| outcome.clone())
+                    .collect();
+                let judged = judge_property(property.kind, &plain, &Normalized);
+                let shown: Vec<(String, String)> = outcomes
+                    .into_iter()
+                    .map(|(target, outcome)| (target, outcome.to_string()))
+                    .collect();
+                (property.name.clone(), judged, shown)
             }
-            let mut results = executor
-                .call(index, std::slice::from_ref(&found.refutation.values))
-                .with_context(|| format!("cannot replay `{}` on {label}", property.name))?;
-            outcomes.push((label.clone(), results.remove(0)));
-        }
-        let plain: Vec<Outcome> = outcomes
-            .iter()
-            .map(|(_, outcome)| outcome.clone())
-            .collect();
-        let judged = judge_property(property.kind, &plain, &Normalized);
+            (Entry::Machine(index), ReplayCase::Sequence(sequence)) => {
+                let machine = &suite.machines[index];
+                let mut traces: Vec<(String, Trace)> = Vec::new();
+                for (label, executor) in executors.iter_mut() {
+                    if let Support::No(reason) = executor.supports_machine(index) {
+                        found
+                            .report
+                            .notes
+                            .push(format!("not replayed on {label}: {reason}"));
+                        continue;
+                    }
+                    let trace = executor
+                        .run(index, sequence)
+                        .with_context(|| format!("cannot replay `{}` on {label}", machine.name))?;
+                    traces.push((label.clone(), trace));
+                }
+                let plain: Vec<Trace> = traces.iter().map(|(_, trace)| trace.clone()).collect();
+                let judged = judge_machine(&plain, &Normalized);
+                let focus = first_difference(&plain);
+                let shown: Vec<(String, String)> = traces
+                    .iter()
+                    .map(|(target, trace)| (target.clone(), describe(machine, trace, focus)))
+                    .collect();
+                (machine.name.clone(), judged, shown)
+            }
+            _ => return Ok(()),
+        };
         let ClaimStatus::Refuted(refuted) = &mut found.report.status else {
             return Ok(());
         };
@@ -127,7 +159,7 @@ impl Replayer<'_> {
             .iter()
             .map(|(target, outcome)| Replay {
                 target: target.clone(),
-                outcome: outcome.to_string(),
+                outcome: outcome.clone(),
             })
             .collect();
         let Some(failure) = judged else {
@@ -147,15 +179,23 @@ impl Replayer<'_> {
                 .iter()
                 .map(|(target, outcome)| TargetOutcome {
                     target: target.clone(),
-                    outcome: outcome.to_string(),
+                    outcome: outcome.clone(),
                 })
                 .collect(),
             recorded: Recorded::now(&self.fe_version, vec!["1".to_string()]),
         };
-        match store.save(&suite.module, &property.name, regression) {
+        match store.save(&suite.module, &entry_name, regression) {
             Ok(path) => refuted.saved_to = Some(path.display().to_string()),
             Err(error) => found.report.notes.push(error.to_string()),
         }
         Ok(())
+    }
+
+    /// Whether the replay disagreed with the proof.
+    pub fn disagrees(report: &ClaimReport) -> bool {
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("do not reproduce"))
     }
 }
