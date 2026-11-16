@@ -24,6 +24,8 @@ pub struct Config {
     /// The longest a sequence of tasks, such as a bounded search, may take
     /// before it stops starting new ones.
     pub search_budget: Duration,
+    /// How many times a loop without an `invariant(..)` is unrolled.
+    pub unroll: usize,
 }
 
 /// Where to write the task as the passes leave it, and its script.
@@ -43,7 +45,7 @@ pub struct Proof {
 }
 
 pub fn prove(mut task: Task, config: &Config, dumps: &Dumps) -> Proof {
-    let pipeline = passes::standard();
+    let pipeline = passes::with_unrolling(config.unroll);
     let verdict = prove_with(&mut task, &pipeline, config, dumps);
     Proof {
         verdict,

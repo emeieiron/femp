@@ -1,0 +1,75 @@
+use femp_spec::invariant
+
+pub fn count_up(_ n: u8) -> u8 {
+    var i: u8 = 0
+    while i < n {
+        invariant(i <= n)
+        i = i + 1
+    }
+    i
+}
+
+pub fn count_without_invariant(_ n: u8) -> u8 {
+    var i: u8 = 0
+    while i < n {
+        i = i + 1
+    }
+    i
+}
+
+pub fn largest(_ xs: [u8; 4]) -> u8 {
+    var best: u8 = 0
+    for x in xs {
+        if x > best { best = x }
+    }
+    best
+}
+
+/// Holds by the invariant, for every `n`.
+#[property]
+pub fn counts_to_n(n: u8) -> bool {
+    count_up(n) == n
+}
+
+/// Holds by unrolling: the loop runs at most five times.
+#[property]
+#[gen(n = "0..=5")]
+pub fn counts_a_few(n: u8) -> bool {
+    count_without_invariant(n) == n
+}
+
+/// Undecided: the loop may run more often than it is unrolled.
+#[property]
+#[gen(n = "0..=50")]
+pub fn counts_many(n: u8) -> bool {
+    count_without_invariant(n) == n
+}
+
+/// Holds by unrolling the four iterations over the array.
+#[property]
+pub fn largest_bounds_every_element(a: u8, b: u8, c: u8, d: u8) -> bool {
+    let best = largest([a, b, c, d])
+    best >= a && best >= b && best >= c && best >= d
+}
+
+pub fn count_with_wrong_invariant(_ n: u8) -> u8 {
+    var i: u8 = 0
+    while i < n {
+        invariant(i < n)
+        i = i + 1
+    }
+    i
+}
+
+/// Fails for every `n` above 0, through the invariant's cut.
+#[property]
+pub fn counts_to_zero(n: u8) -> bool {
+    count_up(n) == 0
+}
+
+/// Fails at `n = 0`: an invariant holds at the loop's head, before the
+/// condition is tested.
+#[property]
+pub fn keeps_a_wrong_invariant(n: u8) -> bool {
+    count_with_wrong_invariant(n) == n
+}
