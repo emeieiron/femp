@@ -10,6 +10,7 @@ use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
+use femp_compiler::Target;
 use femp_toolchain::module_ops;
 
 pub use build::EXECUTABLE;
@@ -79,12 +80,12 @@ impl Platform for NativePlatform {
         &[]
     }
 
-    fn check(&self, cx: &Context<'_>, module: &Module) -> Result<()> {
-        module_ops::check(cx, BACKEND, module)
+    fn check(&self, _cx: &Context<'_>, module: &Module) -> Result<()> {
+        femp_compiler::load(module, Target::Native).map(drop)
     }
 
     fn build(&self, cx: &Context<'_>, module: &Module, out_dir: &Path) -> Result<Vec<Artifact>> {
-        build::build(cx, BACKEND, module, out_dir)
+        build::build(cx, module, out_dir)
     }
 
     fn test(&self, cx: &Context<'_>, module: &Module, filter: Option<&str>) -> Result<TestRun> {
@@ -118,7 +119,7 @@ impl Platform for NativePlatform {
         cx: &Context<'_>,
         request: &HarnessRequest<'_>,
     ) -> Result<Box<dyn Executor>> {
-        harness::start(cx, &self.id, BACKEND, request)
+        harness::start(cx, &self.id, request)
     }
 }
 

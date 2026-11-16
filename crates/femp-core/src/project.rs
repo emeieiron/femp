@@ -77,6 +77,9 @@ impl Module {
                 command,
                 output: self.diagnostics(&output),
             },
+            Error::Rejected { output } => Error::Rejected {
+                output: self.diagnostics(&output),
+            },
             other => other,
         }
     }

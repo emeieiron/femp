@@ -1,0 +1,30 @@
+[package]
+name = "femp-compiler"
+description = "The Fe compiler, linked as a library: checks, builds and tests Fe ingots for Fe Multiplatform, and lowers them for its prover"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+femp-vir.workspace = true
+codegen.workspace = true
+common.workspace = true
+contract-harness.workspace = true
+cranelift-entity.workspace = true
+driver.workspace = true
+hex.workspace = true
+hir.workspace = true
+mir.workspace = true
+num-bigint.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tiny-keccak.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

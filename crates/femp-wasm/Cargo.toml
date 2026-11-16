@@ -8,14 +8,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+femp-compiler.workspace = true
 femp-core.workspace = true
 femp-toolchain.workspace = true
 femp-harness.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-
-tempfile.workspace = true
-url = { version = "2.5", default-features = false }
 
 [dev-dependencies]
 femp-core = { workspace = true, features = ["fixtures"] }

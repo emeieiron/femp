@@ -1,56 +1,30 @@
 use std::path::Path;
 
+use femp_compiler::Target;
+use femp_core::Result;
 use femp_core::artifact::{Artifact, ArtifactKind, reset_dir, write_file};
 use femp_core::platform::Context;
 use femp_core::project::Module;
-use femp_core::{Error, Result};
-use femp_toolchain::invoke::{self, BuildRequest};
-
-use crate::bundle::bundle;
 
 pub const MODULE: ArtifactKind = ArtifactKind("wasm-module");
 pub const MANIFEST: ArtifactKind = ArtifactKind("wasm-manifest");
 
-const STAGE_DIR: &str = "stage";
-
-pub fn build(
-    cx: &Context<'_>,
-    backend: &str,
-    module: &Module,
-    out_dir: &Path,
-) -> Result<Vec<Artifact>> {
+/// Writes the module and its build manifest, `<ingot>.wasm` and
+/// `<ingot>.manifest.json`.
+pub fn build(cx: &Context<'_>, module: &Module, out_dir: &Path) -> Result<Vec<Artifact>> {
     reset_dir(out_dir)?;
-
-    // Checking the real ingot first reports mistakes against the files the
-    // user wrote rather than against the generated bundle.
-    invoke::check(&cx.environment.toolchain, backend, &module.dir)?;
-
-    let name = &module.ingot.name;
-    let staged = out_dir.join(STAGE_DIR).join(format!("{name}.fe"));
-    write_file(&staged, bundle(cx.project, module)?)?;
-
-    invoke::build(
-        &cx.environment.toolchain,
-        &BuildRequest {
-            backend,
-            input: &staged,
-            out_dir,
-            emit: &["wasm"],
-            optimize: cx.optimize,
-            standalone: true,
-        },
-    )?;
-
+    let session = femp_compiler::load(module, Target::Wasm)?;
+    let built = session.build_wasm(cx.optimize)?;
+    let wasm = out_dir.join(&built.file_name);
+    write_file(&wasm, &built.wasm)?;
+    let stem = built
+        .file_name
+        .strip_suffix(".wasm")
+        .unwrap_or(&built.file_name);
+    let manifest = out_dir.join(format!("{stem}.manifest.json"));
+    write_file(&manifest, &built.manifest)?;
     Ok(vec![
-        Artifact::existing(MODULE, out_dir.join(format!("{name}.wasm")))?,
-        Artifact::existing(MANIFEST, out_dir.join(format!("{name}.manifest.json")))?,
+        Artifact::existing(MODULE, wasm)?,
+        Artifact::existing(MANIFEST, manifest)?,
     ])
-}
-
-pub fn check_bundle(cx: &Context<'_>, backend: &str, module: &Module) -> Result<()> {
-    let scratch = tempfile::tempdir()
-        .map_err(|error| Error::io("stage WASM source in", &std::env::temp_dir(), error))?;
-    let staged = scratch.path().join(format!("{}.fe", module.ingot.name));
-    write_file(&staged, bundle(cx.project, module)?)?;
-    invoke::check_standalone(&cx.environment.toolchain, backend, &staged)
 }

@@ -9,10 +9,10 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
+use femp_compiler::LINKED_FE_VERSION;
 use femp_core::artifact::write_file;
 use femp_core::environment::OptLevel;
 use femp_core::project::BUILD_DIR;
-use femp_frontend::LINKED_FE_VERSION;
 use femp_prove::Config;
 use femp_prove::report::{self, ProveReport};
 

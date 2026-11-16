@@ -1,6 +1,5 @@
 mod bindings;
 mod build;
-mod bundle;
 mod harness;
 mod manifest;
 
@@ -13,6 +12,7 @@ use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
 use femp_core::{Error, Result};
+use femp_compiler::Target;
 use femp_toolchain::module_ops;
 use femp_toolchain::node::MIN_MAJOR as MIN_NODE_MAJOR;
 
@@ -68,16 +68,12 @@ impl Platform for WasmPlatform {
         &[bindings::TYPESCRIPT]
     }
 
-    fn check(&self, cx: &Context<'_>, module: &Module) -> Result<()> {
-        module_ops::check(cx, BACKEND, module)?;
-        if module.platform() == Some(&self.id) {
-            build::check_bundle(cx, BACKEND, module)?;
-        }
-        Ok(())
+    fn check(&self, _cx: &Context<'_>, module: &Module) -> Result<()> {
+        femp_compiler::load(module, Target::Wasm).map(drop)
     }
 
     fn build(&self, cx: &Context<'_>, module: &Module, out_dir: &Path) -> Result<Vec<Artifact>> {
-        build::build(cx, BACKEND, module, out_dir)
+        build::build(cx, module, out_dir)
     }
 
     fn test(&self, cx: &Context<'_>, module: &Module, filter: Option<&str>) -> Result<TestRun> {
@@ -116,7 +112,7 @@ impl Platform for WasmPlatform {
         request: &HarnessRequest<'_>,
     ) -> Result<Box<dyn Executor>> {
         require_node(cx)?;
-        harness::start(cx, &self.id, BACKEND, request)
+        harness::start(cx, &self.id, request)
     }
 }
 

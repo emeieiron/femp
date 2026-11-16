@@ -14,7 +14,7 @@ femp-vir.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-femp-frontend.workspace = true
+femp-compiler.workspace = true
 tempfile.workspace = true
 
 [lints]

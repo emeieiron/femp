@@ -21,7 +21,7 @@ femp-testing.workspace = true
 femp-prop.workspace = true
 femp-spec.workspace = true
 femp-vir.workspace = true
-femp-frontend.workspace = true
+femp-compiler.workspace = true
 femp-prove.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }

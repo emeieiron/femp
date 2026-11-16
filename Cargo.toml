@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.97"
 license = "Apache-2.0"
 repository = "https://github.com/emeieiron/femp"
 
@@ -19,19 +19,23 @@ femp-testing = { path = "crates/femp-testing" }
 femp-prop = { path = "crates/femp-prop" }
 femp-spec = { path = "crates/femp-spec" }
 femp-vir = { path = "crates/femp-vir" }
-femp-frontend = { path = "crates/femp-frontend" }
+femp-compiler = { path = "crates/femp-compiler" }
 femp-prove = { path = "crates/femp-prove" }
 femp-harness = { path = "crates/femp-harness" }
 
-# The Fe compiler, linked only into femp-frontend. Keep the tag in step with
-# femp_frontend::LINKED_FE_VERSION and the toolchain femp installs.
+# The Fe compiler, linked only into femp-compiler under its own crate names.
+# Keep the tag in step with femp_compiler::LINKED_FE_VERSION.
 # Fe's IR ids implement this crate's `EntityRef`.
 cranelift-entity = "0.136"
-fe-common = { git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
-fe-driver = { git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
-fe-hir = { git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
+codegen = { package = "fe-codegen", git = "https://github.com/argotorg/fe", tag = "v26.6.0", features = ["cranelift", "wasm"] }
+common = { package = "fe-common", git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
+contract-harness = { package = "fe-contract-harness", git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
+driver = { package = "fe-driver", git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
+hir = { package = "fe-hir", git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
+mir = { package = "fe-mir", git = "https://github.com/argotorg/fe", tag = "v26.6.0" }
 
 anyhow = "1"
+hex = "0.4"
 clap = { version = "4", features = ["derive"] }
 revm = { version = "33.1.0", default-features = false, features = ["std"] }
 num-bigint = "0.4"
@@ -41,6 +45,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
+tiny-keccak = { version = "2", features = ["keccak"] }
 toml = "0.8"
 url = "2"
 

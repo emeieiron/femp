@@ -1,0 +1,7 @@
+[ingot]
+name = "tally_contract"
+version = "0.1.0"
+target = "evm"
+
+[dependencies]
+tally_core = "../core"

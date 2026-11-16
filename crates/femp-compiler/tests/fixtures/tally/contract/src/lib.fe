@@ -1,0 +1,32 @@
+use std::evm::{Evm, Log}
+use tally_core::add
+
+msg TallyMsg {
+    #[selector = sol("add(uint64)")]
+    Add { amount: u64 } -> u64,
+    #[selector = sol("total()")]
+    Total -> u64,
+}
+
+#[event]
+pub struct Added { pub amount: u64, pub total: u64 }
+
+struct TallyStore { total: u64 }
+
+pub contract Tally uses (log: mut Log) {
+    mut store: TallyStore,
+
+    init(start: u64) uses (mut store) { store.total = start }
+
+    recv TallyMsg {
+        Add { amount } -> u64 uses (mut store, mut log) {
+            store.total = add(store.total, amount)
+            log.emit(Added { amount, total: store.total })
+            store.total
+        }
+
+        Total -> u64 uses (store) {
+            store.total
+        }
+    }
+}

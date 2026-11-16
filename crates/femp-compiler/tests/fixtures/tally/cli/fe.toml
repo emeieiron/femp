@@ -1,0 +1,7 @@
+[ingot]
+name = "tally_cli"
+version = "0.1.0"
+target = "native"
+
+[dependencies]
+tally_core = "../core"

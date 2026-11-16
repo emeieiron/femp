@@ -7,9 +7,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
+use femp_compiler::{Root, Session, Target, Unsupported};
 use femp_core::project::Module;
 use femp_core::property::{Machine, PropertyKind};
-use femp_frontend::{Loaded, Root, Unsupported};
 use femp_prove::obligation::contract;
 use femp_prove::obligation::differential::{self, Side};
 use femp_prove::obligation::machine::{self, MachineFns};
@@ -292,7 +292,9 @@ pub fn add_target(
     label: &str,
     options: &Options,
 ) -> Result<()> {
-    let loaded = Loaded::open(&module.dir, fe_target)
+    let target = Target::parse(fe_target)
+        .ok_or_else(|| anyhow!("the compiler has no target `{fe_target}`"))?;
+    let loaded = Session::open(&module.dir, target)
         .map_err(|error| anyhow!("cannot load `{}` for {label}: {error}", module.name))?;
     let wanted = roots(claims);
     let lowered = loaded.lower(&wanted.roots);
