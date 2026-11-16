@@ -67,8 +67,10 @@ femp build
 
 ### Building from source
 
-Building from source needs Rust 1.88 or newer for femp, Rust 1.97 or newer and npm for the Fe
-compiler, Node.js 20 or newer, and a C compiler.
+Building from source needs Rust 1.96 or newer for femp, Rust 1.97 or newer and npm for the Fe
+compiler, Node.js 20 or newer, and a C compiler. femp links the Fe compiler's own crates for
+`femp prove`; Cargo fetches them from the Fe repository at the pinned release, so the first
+build takes a few minutes longer.
 
 ```sh
 cargo install --path crates/femp-cli   # installs the `femp` binary
