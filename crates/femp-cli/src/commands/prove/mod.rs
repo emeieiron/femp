@@ -2,6 +2,7 @@
 
 mod aggregate;
 mod plan;
+mod replay;
 mod schedule;
 
 use std::thread;
@@ -22,6 +23,8 @@ use crate::session::Session;
 
 const PROVE_DIR: &str = "prove";
 const REPORT_FILE: &str = "report.json";
+/// Seconds one replayed counterexample may run on a target.
+const REPLAY_TIMEOUT: u64 = 10;
 
 pub fn run(args: &ProveArgs) -> Result<bool> {
     let session = Session::open()?;
@@ -91,15 +94,40 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
     });
 
     let places = aggregate::Places::new(project);
+    let (mut claims, refutations): (Vec<_>, Vec<_>) = plans
+        .iter()
+        .map(|plan| aggregate::report(plan, &places))
+        .unzip();
+    if !args.no_replay {
+        let replayer = replay::Replayer {
+            inputs: &inputs,
+            platforms: &platforms,
+            timeout: Duration::from_secs(REPLAY_TIMEOUT),
+            fe_version: session.environment.toolchain.version.clone(),
+        };
+        for (module, module_claims) in &found {
+            let pending: Vec<replay::Found<'_>> = claims
+                .iter_mut()
+                .zip(&plans)
+                .zip(&refutations)
+                .filter(|((_, plan), _)| plan.module == module.name)
+                .filter_map(|((report, plan), refutation)| {
+                    Some(replay::Found {
+                        plan,
+                        report,
+                        refutation: refutation.clone()?,
+                    })
+                })
+                .collect();
+            replayer.replay(module, module_claims, pending)?;
+        }
+    }
     let report = ProveReport {
         targets: platforms
             .iter()
             .map(|platform| platform.id().to_string())
             .collect(),
-        claims: plans
-            .iter()
-            .map(|plan| aggregate::report(plan, &places))
-            .collect(),
+        claims,
     };
     console::line("");
     console::line(report::render(&report).trim_end());
