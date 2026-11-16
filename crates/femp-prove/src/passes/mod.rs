@@ -9,6 +9,8 @@ mod recursion;
 mod scope;
 mod simplify;
 mod slots;
+pub(crate) mod spec_shape;
+mod summaries;
 
 use femp_vir::{Expr, FuncId, Program, StmtKind};
 
@@ -25,6 +27,8 @@ pub fn standard() -> Vec<Box<dyn Pass>> {
     vec![
         Box::new(scope::Scope),
         Box::new(recursion::Recursion),
+        Box::new(spec_shape::SpecShape),
+        Box::new(summaries::Summaries),
         Box::new(inline::Inline),
         Box::new(slots::Slots),
         Box::new(checks::Checks),

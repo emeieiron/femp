@@ -15,11 +15,15 @@ pub enum Definition {
     Equals(String),
     Facts(Vec<String>),
     Arbitrary,
+    /// Equals the term, which may be any well-formed value.
+    Unknown(String),
 }
 
 pub struct Terms<'a> {
     pub sorts: &'a Sorts<'a>,
     pub function: &'a Function,
+    /// The uninterpreted function of each name `Expr::Apply` uses.
+    pub applied: &'a std::collections::BTreeMap<String, String>,
 }
 
 pub fn name(value: ValueId) -> String {
@@ -101,6 +105,22 @@ impl Terms<'_> {
             }
             Expr::Intrinsic { op, args } => self.intrinsic(dst, *op, args)?,
             Expr::Havoc => return Ok(Definition::Arbitrary),
+            Expr::Apply {
+                name: applied,
+                args,
+            } => {
+                let function = self
+                    .applied
+                    .get(applied)
+                    .ok_or_else(|| internal("an undeclared function"))?;
+                let term = if args.is_empty() {
+                    function.clone()
+                } else {
+                    let args: Vec<String> = args.iter().map(|arg| name(*arg)).collect();
+                    format!("({function} {})", args.join(" "))
+                };
+                return Ok(Definition::Unknown(term));
+            }
             Expr::Load { .. } => return Err(internal("a slot load")),
             Expr::Call { .. } => return Err(internal("a call")),
         };

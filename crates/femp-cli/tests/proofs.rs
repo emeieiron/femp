@@ -134,6 +134,8 @@ fn the_demonstrator_claims_are_proved() {
         "schedule_error",
         "vested_amount",
         "VestingModel",
+        "vested_at_spec",
+        "claim_spec",
     ] {
         let line = entry(&report, &format!("core::{name}"));
         assert!(line.starts_with("PROVED"), "{report}");
@@ -143,9 +145,97 @@ fn the_demonstrator_claims_are_proved() {
     assert!(contract.starts_with("UNSUPPORTED"), "{contract}");
     assert!(contract.contains("at evm/src/machines.fe:"), "{contract}");
     assert!(
-        report.contains("8 proved, 0 refuted, 0 unknown, 1 not supported"),
+        report.contains("10 proved, 0 refuted, 0 unknown, 1 not supported"),
         "{report}"
     );
     let lenient = femp(project.path(), &["prove", "-f", "vest"]);
     assert!(lenient.status.success(), "{}", stdout(&lenient));
+}
+
+const SPEC_LIBRARY: &str = "../../ingots/spec";
+
+/// Gives a copy of the planted fixture the specification library, as
+/// `femp new` does.
+fn with_specs(project: &std::path::Path, specs: &str) {
+    common::copy_dir(&common::fixture(SPEC_LIBRARY), &project.join("spec"));
+    let manifest = project.join("shared/fe.toml");
+    let mut text = fs::read_to_string(&manifest).unwrap();
+    text.push_str("\n[dependencies]\nfemp_spec = \"../spec\"\n");
+    fs::write(&manifest, text).unwrap();
+    fs::write(project.join("shared/src/specs.fe"), specs).unwrap();
+}
+
+#[test]
+fn trusted_specs_stand_in_for_their_targets_and_are_listed() {
+    let Some(project) = project(PLANTED) else {
+        return;
+    };
+    with_specs(
+        project.path(),
+        r#"use femp_spec::{ensures, requires}
+use ingot::doubled
+
+#[spec(trusted)]
+fn doubled_spec(x: u64) -> u64 {
+    requires(x <= 1000)
+    let result = doubled(x)
+    ensures(result >= x)
+    result
+}
+
+#[property]
+#[gen(x = "0..=1000")]
+pub fn doubling_grows(x: u64) -> bool {
+    doubled(x) >= x
+}
+
+#[property]
+pub fn doubling_anything(x: u64) -> bool {
+    doubled(x) >= x
+}
+"#,
+    );
+    let output = femp(project.path(), &["prove", "-f", "doubl"]);
+    let report = stdout(&output);
+    let spec = entry(&report, "core::doubled_spec");
+    assert!(spec.starts_with("SKIPPED"), "{spec}");
+    assert!(spec.contains("trusted"), "{spec}");
+    assert!(
+        entry(&report, "core::doubling_grows").starts_with("PROVED"),
+        "{report}"
+    );
+    let unbounded = entry(&report, "core::doubling_anything");
+    assert!(unbounded.starts_with("UNKNOWN"), "{unbounded}");
+    assert!(
+        unbounded.contains("the precondition of `doubled_spec` may not hold"),
+        "{unbounded}"
+    );
+    assert!(
+        report.contains(
+            "assumed\n  core::doubling_grows: the trusted spec `doubled_spec` stands for `doubled`"
+        ),
+        "{report}"
+    );
+}
+
+#[test]
+fn new_projects_prove_their_spec() {
+    if !solver_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let created = femp(dir.path(), &["new", "fresh"]);
+    assert!(created.status.success(), "{}", stdout(&created));
+    let project = dir.path().join("fresh");
+    if !femp(&project, &["doctor"]).status.success() {
+        eprintln!("skipping: `femp doctor` reports that this machine cannot build the template");
+        return;
+    }
+    let output = femp(&project, &["prove"]);
+    let report = stdout(&output);
+    assert!(output.status.success(), "{report}");
+    assert!(
+        entry(&report, "core::fee_spec").starts_with("PROVED"),
+        "{report}"
+    );
 }

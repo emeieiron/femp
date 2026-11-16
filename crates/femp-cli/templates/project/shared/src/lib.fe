@@ -1,3 +1,5 @@
+use femp_spec::ensures
+
 pub const BASIS_POINTS: u64 = 10000
 
 /// The fee on `amount` at a rate in basis points, rounded down. Rates above
@@ -11,6 +13,15 @@ pub fn fee(amount: u64, rate: u64) -> u64 {
     // Widened so the product cannot overflow; the result is at most `amount`.
     let scaled = (amount as u256) * (capped as u256) / (BASIS_POINTS as u256)
     scaled.downcast_unchecked()
+}
+
+/// What `fee` promises for every input, which `femp prove` proves: it never
+/// charges more than the amount.
+#[spec]
+fn fee_spec(amount: u64, rate: u64) -> u64 {
+    let charged = fee(amount, rate)
+    ensures(charged <= amount)
+    charged
 }
 
 #[test]

@@ -44,7 +44,9 @@ impl Expr {
                 out.push(new);
             }
             Self::Load { path, .. } => path_values(path, &mut out),
-            Self::Call { args, .. } | Self::Intrinsic { args, .. } => out.extend(args),
+            Self::Call { args, .. } | Self::Intrinsic { args, .. } | Self::Apply { args, .. } => {
+                out.extend(args)
+            }
             Self::Const(_) | Self::Havoc => {}
         }
         out
@@ -74,7 +76,9 @@ impl Expr {
                 out.push(new);
             }
             Self::Load { path, .. } => path_values_mut(path, &mut out),
-            Self::Call { args, .. } | Self::Intrinsic { args, .. } => out.extend(args),
+            Self::Call { args, .. } | Self::Intrinsic { args, .. } | Self::Apply { args, .. } => {
+                out.extend(args)
+            }
             Self::Const(_) | Self::Havoc => {}
         }
         out

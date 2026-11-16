@@ -24,10 +24,8 @@ pub fn task(program: &Program, func: FuncId, property: &Property) -> Result<Task
     cursor.terminate(Terminator::Return(unit));
     let entry = program.push(entry);
     Ok(Task {
-        program,
-        entry,
         inputs,
         assumed,
-        timeout: None,
+        ..Task::new(program, entry)
     })
 }

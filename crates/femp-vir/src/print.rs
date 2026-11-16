@@ -4,8 +4,8 @@
 use std::fmt::Write;
 
 use crate::program::{
-    Arith, BinOp, Check, Const, Expr, Function, Index, Intrinsic, Program, Proj, SpecOp, Stmt,
-    StmtKind, Succ, Terminator, UnOp, ValueId,
+    Arith, BinOp, Check, Const, Expr, Function, Index, Intrinsic, Mode, Program, Proj, SpecOp,
+    Stmt, StmtKind, Succ, Terminator, UnOp, ValueId,
 };
 use crate::types::{TypeDef, TypeTable};
 
@@ -111,7 +111,11 @@ pub fn function(types: &TypeTable, function: &Function) -> String {
     for id in function.block_ids() {
         let block = function.block(id);
         let params: Vec<String> = block.params.iter().map(|p| printer.typed(*p)).collect();
-        let mode = if block.assumed { " assumed" } else { "" };
+        let mode = match block.mode {
+            Mode::Checked => "",
+            Mode::Trusted => " trusted",
+            Mode::Assumed => " assumed",
+        };
         if params.is_empty() {
             let _ = writeln!(out, "{id}{mode}:");
         } else {
@@ -237,6 +241,7 @@ impl Printer<'_> {
                 format!("{op}({})", Self::list(args))
             }
             Expr::Havoc => "havoc".to_string(),
+            Expr::Apply { name, args } => format!("apply `{name}`({})", Self::list(args)),
         }
     }
 

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use femp_prove::{Config, Dumps, Task, Verdict};
+use femp_prove::{Config, Dumps, Proof, Task, Verdict};
 
 use super::plan::{ClaimPlan, Done, Pending};
 
@@ -39,7 +39,7 @@ pub fn run(plans: &mut [ClaimPlan], config: &Config, jobs: usize, on_done: &(dyn
         }
     }
     let next = AtomicUsize::new(0);
-    let verdicts: Vec<Mutex<Option<(usize, Verdict)>>> =
+    let verdicts: Vec<Mutex<Option<(usize, Proof)>>> =
         work.iter().map(|_| Mutex::new(None)).collect();
     thread::scope(|scope| {
         for _ in 0..jobs.max(1).min(work.len().max(1)) {
@@ -59,18 +59,30 @@ pub fn run(plans: &mut [ClaimPlan], config: &Config, jobs: usize, on_done: &(dyn
         }
     });
     for (item, verdict) in work.into_iter().zip(verdicts) {
-        let (index, verdict) = verdict
-            .into_inner()
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| (0, Verdict::Unknown("the task did not finish".to_string())));
-        let pending = &mut plans[item.claim].results[item.slot];
+        let (index, proof) = verdict.into_inner().ok().flatten().unwrap_or_else(|| {
+            (
+                0,
+                Proof {
+                    verdict: Verdict::Unknown("the task did not finish".to_string()),
+                    relies_on: Vec::new(),
+                    assumed: Vec::new(),
+                },
+            )
+        });
+        let plan = &mut plans[item.claim];
+        for note in &proof.assumed {
+            if !plan.assumed.contains(note) {
+                plan.assumed.push(note.clone());
+            }
+        }
+        let pending = &mut plan.results[item.slot];
         if let Pending::Job(job) = pending {
             *pending = Pending::Done(Done {
                 role: job.role,
                 targets: job.targets.clone(),
                 index,
-                verdict,
+                verdict: proof.verdict,
+                relies_on: proof.relies_on,
             });
         }
     }

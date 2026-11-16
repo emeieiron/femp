@@ -70,9 +70,11 @@ pub fn encode(task: &Task) -> Result<Script, NotSupported> {
         .chain(task.program.types.defs.iter().flat_map(def_int_types))
         .collect();
     out.push_str(&ints::prelude(&ints));
+    let applied = declare_applied(function, &sorts, &mut out);
     let terms = Terms {
         sorts: &sorts,
         function,
+        applied: &applied,
     };
     let mut encoder = Encoder {
         terms,
@@ -87,6 +89,42 @@ pub fn encode(task: &Task) -> Result<Script, NotSupported> {
         prelude: encoder.out,
         obligations: encoder.obligations,
     })
+}
+
+/// Declares an uninterpreted function for each name `Expr::Apply` uses.
+fn declare_applied(
+    function: &Function,
+    sorts: &Sorts<'_>,
+    out: &mut String,
+) -> std::collections::BTreeMap<String, String> {
+    let mut applied = std::collections::BTreeMap::new();
+    for block in &function.blocks {
+        for stmt in &block.stmts {
+            let StmtKind::Def {
+                dst,
+                expr: femp_vir::Expr::Apply { name, args },
+            } = &stmt.kind
+            else {
+                continue;
+            };
+            if applied.contains_key(name) {
+                continue;
+            }
+            let symbol = format!("uf{}", applied.len());
+            let params: Vec<String> = args
+                .iter()
+                .map(|arg| sorts.sort(function.ty(*arg)))
+                .collect();
+            let _ = writeln!(
+                out,
+                "(declare-fun {symbol} ({}) {})",
+                params.join(" "),
+                sorts.sort(function.ty(*dst))
+            );
+            applied.insert(name.clone(), symbol);
+        }
+    }
+    applied
 }
 
 fn int_types(ty: &Type) -> Vec<(u16, bool)> {
@@ -190,6 +228,13 @@ impl Encoder<'_> {
                         }
                     }
                     Definition::Arbitrary => {
+                        let ty = function.ty(*dst);
+                        if let Some(wf) = self.terms.sorts.wf(ty, &name(*dst)) {
+                            self.line(format!("(assert {wf})"));
+                        }
+                    }
+                    Definition::Unknown(term) => {
+                        self.line(format!("(assert (= {} {term}))", name(*dst)));
                         let ty = function.ty(*dst);
                         if let Some(wf) = self.terms.sorts.wf(ty, &name(*dst)) {
                             self.line(format!("(assert {wf})"));

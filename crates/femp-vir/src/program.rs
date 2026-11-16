@@ -217,10 +217,23 @@ pub struct Block {
     pub stmts: Vec<Stmt>,
     pub term: Terminator,
     pub span: Span,
-    /// Panics here are assumed not to happen rather than checked, as when
-    /// an invariant is assumed of an arbitrary state. Code inlined into
-    /// such a block inherits it.
-    pub assumed: bool,
+    /// What this block's checks mean; code inlined here inherits the
+    /// stronger of its own mode and this one.
+    pub mode: Mode,
+}
+
+/// How a block's checks are treated.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Mode {
+    /// Every check is an obligation.
+    #[default]
+    Checked,
+    /// Panics are assumed not to happen, as in a proved spec's summary,
+    /// whose proof already ruled them out; other checks stay obligations.
+    Trusted,
+    /// Every check is assumed, as when invariants are assumed of an
+    /// arbitrary state.
+    Assumed,
 }
 
 impl Default for Block {
@@ -230,7 +243,7 @@ impl Default for Block {
             stmts: Vec::new(),
             term: Terminator::Unreachable,
             span: Span::default(),
-            assumed: false,
+            mode: Mode::Checked,
         }
     }
 }
@@ -286,6 +299,10 @@ pub enum Check {
     Panic(PanicKind),
     /// A claim the task states, described for the report.
     Claim(String),
+    /// What a spec `ensures` of its target's result.
+    Ensures,
+    /// What the named spec `requires` of a call to its target.
+    Precondition(String),
     /// A loop may run more often than it was unrolled.
     Unwind,
 }
@@ -295,6 +312,8 @@ impl fmt::Display for Check {
         match self {
             Self::Panic(kind) => write!(f, "panic: {kind}"),
             Self::Claim(text) => f.write_str(text),
+            Self::Ensures => f.write_str("an `ensures` does not hold"),
+            Self::Precondition(spec) => write!(f, "the precondition of `{spec}` may not hold"),
             Self::Unwind => f.write_str("loop exceeds its unrolling"),
         }
     }
@@ -475,6 +494,12 @@ pub enum Expr {
     },
     /// Any well-formed value of the result's type.
     Havoc,
+    /// The result of a function known only by name, as a spec leaves it:
+    /// any well-formed value, but the same one for the same arguments.
+    Apply {
+        name: String,
+        args: Vec<ValueId>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

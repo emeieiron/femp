@@ -64,7 +64,7 @@ fn splice(
 
     let cont = caller.new_block();
     let call_block = caller.block_mut(block);
-    let assumed = call_block.assumed;
+    let mode = call_block.mode;
     let tail = call_block.stmts.split_off(index + 1);
     call_block.stmts.pop();
     let term = std::mem::replace(
@@ -77,12 +77,12 @@ fn splice(
     cont_block.stmts = tail;
     cont_block.term = term;
     cont_block.span = span;
-    cont_block.assumed = assumed;
+    cont_block.mode = mode;
 
     let value = |id: ValueId| values[id.index()];
     for (old, new) in callee.blocks.iter().zip(&blocks) {
         let mut copy = old.clone();
-        copy.assumed |= assumed;
+        copy.mode = copy.mode.max(mode);
         copy.params = copy.params.iter().map(|param| value(*param)).collect();
         for stmt in &mut copy.stmts {
             for operand in stmt.kind.operands_mut() {

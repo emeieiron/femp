@@ -40,6 +40,9 @@ pub struct Found<'a> {
     pub plan: &'a ClaimPlan,
     pub report: &'a mut ClaimReport,
     pub case: ReplayCase,
+    /// Whether the proof used specs in place of their targets, which leave
+    /// results open that the code may never produce.
+    pub relied: bool,
 }
 
 impl Replayer<'_> {
@@ -163,6 +166,15 @@ impl Replayer<'_> {
             })
             .collect();
         let Some(failure) = judged else {
+            if found.relied {
+                let shown = refuted.failure.clone();
+                found.report.status = ClaimStatus::Unknown {
+                    reason: format!(
+                        "{shown} with a result a spec allows, but the compiled targets do not fail on this counterexample; a stronger spec may prove it"
+                    ),
+                };
+                return Ok(());
+            }
             found.report.notes.push(
                 "the compiled targets do not reproduce this counterexample: the proof model and the compiled code disagree"
                     .to_string(),

@@ -1,6 +1,7 @@
 //! Builds the task of each claim: a procedure of `assume` and `assert`
 //! around calls to the claim's functions.
 
+pub mod contract;
 pub mod differential;
 mod inputs;
 pub mod machine;

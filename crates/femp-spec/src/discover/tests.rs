@@ -286,6 +286,13 @@ pub struct Position { pub claimed: u64 }
 
 impl Position {
     pub fn claim(self, amount: u64, now: u64) -> Position { self }
+    pub fn step(self) -> Position { self }
+}
+
+pub struct Model {}
+
+impl Model {
+    pub fn step(self) -> Model { self }
 }
 
 pub fn open(total: u64) -> Position { Position { claimed: 0 } }
@@ -309,6 +316,11 @@ pub fn opening(_ total: u64) -> Position {
 fn claim_again(position: Position, amount: u64, now: u64) -> Position {
     position.claim(amount, now)
 }
+
+#[spec(target = "step")]
+fn receiver_decides(model: Model) -> Model {
+    model.step()
+}
 "#;
 
 #[test]
@@ -321,7 +333,11 @@ fn finds_specs_and_resolves_their_targets() {
     .unwrap();
     assert!(claims.suite.is_empty());
     let names: Vec<&str> = claims.contracts.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["claim_spec", "opening", "claim_again"]);
+    assert_eq!(
+        names,
+        ["claim_spec", "opening", "claim_again", "receiver_decides"]
+    );
+    assert_eq!(claims.contracts[3].target.to_string(), "Model::step");
 
     let claim = &claims.contracts[0];
     assert_eq!(claim.path, ["specs"]);
@@ -396,7 +412,7 @@ impl B {
         "`timeout` must be a whole number",
         "cannot be generic",
         "only `bool` and fixed-width integer parameters take generators",
-        "could be `A::step` at",
+        "could be `A::step` or `B::step`",
         "either `#[spec]` or `#[property]`",
         "belongs on a free function",
     ] {

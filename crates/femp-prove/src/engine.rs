@@ -33,34 +33,72 @@ pub struct Dumps {
     pub smt: Option<PathBuf>,
 }
 
-pub fn prove(mut task: Task, config: &Config, dumps: &Dumps) -> Verdict {
+/// A verdict, with what the proof relied on to reach it.
+#[derive(Debug, Clone)]
+pub struct Proof {
+    pub verdict: Verdict,
+    /// Specs whose summaries stood in for their targets.
+    pub relies_on: Vec<String>,
+    pub assumed: Vec<String>,
+}
+
+pub fn prove(mut task: Task, config: &Config, dumps: &Dumps) -> Proof {
     let pipeline = passes::standard();
-    prove_with(&mut task, &pipeline, config, dumps)
+    let verdict = prove_with(&mut task, &pipeline, config, dumps);
+    Proof {
+        verdict,
+        relies_on: task.relies_on,
+        assumed: task.assumed,
+    }
 }
 
 /// Proves tasks in order until one is refuted, as a search over growing
 /// bounds does, and says which one decided. A sequence stops early once it
 /// has spent the search budget, as undecided at the last task it finished.
-pub fn prove_first(tasks: &[Task], config: &Config, dumps: &[Dumps]) -> (usize, Verdict) {
+pub fn prove_first(tasks: &[Task], config: &Config, dumps: &[Dumps]) -> (usize, Proof) {
     let started = std::time::Instant::now();
-    let mut unknown = None;
+    let mut unknown: Option<(usize, String)> = None;
+    let mut relies_on: Vec<String> = Vec::new();
+    let mut assumed: Vec<String> = Vec::new();
+    let finish = |verdict, relies_on, assumed| Proof {
+        verdict,
+        relies_on,
+        assumed,
+    };
     for (index, task) in tasks.iter().enumerate() {
         if index > 0 && started.elapsed() > config.search_budget {
             let reason = format!("the search stopped after {index} steps, its time budget spent");
-            return (index - 1, Verdict::Unknown(reason));
+            return (
+                index - 1,
+                finish(Verdict::Unknown(reason), relies_on, assumed),
+            );
         }
         let dumps = dumps.get(index).cloned().unwrap_or_default();
-        match prove(task.clone(), config, &dumps) {
+        let proof = prove(task.clone(), config, &dumps);
+        for name in proof.relies_on {
+            if !relies_on.contains(&name) {
+                relies_on.push(name);
+            }
+        }
+        for note in proof.assumed {
+            if !assumed.contains(&note) {
+                assumed.push(note);
+            }
+        }
+        match proof.verdict {
             Verdict::Proved => {}
             Verdict::Unknown(reason) => {
                 unknown.get_or_insert((index, reason));
             }
-            decided => return (index, decided),
+            decided => return (index, finish(decided, relies_on, assumed)),
         }
     }
     match unknown {
-        Some((index, reason)) => (index, Verdict::Unknown(reason)),
-        None => (tasks.len().saturating_sub(1), Verdict::Proved),
+        Some((index, reason)) => (index, finish(Verdict::Unknown(reason), relies_on, assumed)),
+        None => (
+            tasks.len().saturating_sub(1),
+            finish(Verdict::Proved, relies_on, assumed),
+        ),
     }
 }
 
