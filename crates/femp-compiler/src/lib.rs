@@ -26,7 +26,9 @@ mod wasm;
 pub use error::{CompileError, Unsupported};
 pub use evm::{Contract, EvmBuild};
 pub use find::Root;
-pub use lower::{ContractRoot, Handler, Invariant, Lowered, LoweredContract};
+pub use lower::{
+    ContractRoot, Handler, Invariant, Lowered, LoweredContract, LoweredMessage, MessageRoot,
+};
 pub use module::{load, test};
 pub use session::Session;
 pub use spec_ops::SPEC_INGOT;

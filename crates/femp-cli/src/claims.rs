@@ -73,6 +73,9 @@ fn relativize(claims: &mut Claims, root: &Path) {
         for invariant in &mut claim.invariants {
             invariant.location.file = relative(&invariant.location.file, root);
         }
+        for message in &mut claim.messages {
+            message.location.file = relative(&message.location.file, root);
+        }
     }
 }
 
@@ -102,7 +105,12 @@ pub fn list(found: &[(&Module, Claims)], all_specs: bool) {
         }
         if all_specs {
             for claim in &claims.storage {
-                line(&claim.name, "contract", &claim.location);
+                if claim.claims_invariants && !claim.invariants.is_empty() {
+                    line(&claim.name, "contract", &claim.location);
+                }
+                for message in &claim.messages {
+                    line(&message.name, "message", &message.location);
+                }
             }
         }
     }

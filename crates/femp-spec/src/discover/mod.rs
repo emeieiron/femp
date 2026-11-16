@@ -21,7 +21,7 @@ use femp_core::property::{
 };
 use femp_core::source_tree::ModuleTree;
 
-use crate::claims::{Claims, Contract, StorageClaim, StorageInvariant};
+use crate::claims::{Claims, Contract, MessageClaim, MessageKind, StorageClaim, StorageInvariant};
 use contracts::{Candidate, PendingSpec};
 use parse::{Attr, RawContract, RawFn, RawModule, RawStruct};
 
@@ -68,6 +68,7 @@ pub fn discover(module: &Module) -> Result<Claims, Vec<DiscoveryError>> {
         contracts: Vec::new(),
         deployed: Vec::new(),
         storage_invariants: Vec::new(),
+        message_claims: Vec::new(),
     };
     for (path, file, source) in sources {
         let file = authored(module, &file);
@@ -125,6 +126,8 @@ struct Builder {
     deployed: Vec<(RawContract, Vec<String>, PathBuf)>,
     /// Free `#[invariant]` functions, with the contract they name if any.
     storage_invariants: Vec<(StorageInvariant, Option<String>)>,
+    /// `#[ensures]` and `#[reverts]` functions, likewise.
+    message_claims: Vec<(MessageClaim, Option<String>)>,
 }
 
 impl Builder {
@@ -147,6 +150,10 @@ impl Builder {
         for function in &raw.fns {
             if has(&function.attrs, "invariant") {
                 self.storage_invariant(file, &raw.path, function);
+                continue;
+            }
+            if let Some(kind) = message_kind(&function.attrs) {
+                self.message_claim(file, &raw.path, function, kind);
                 continue;
             }
             for attr in &function.attrs {
@@ -658,59 +665,116 @@ impl Builder {
         ));
     }
 
-    /// Groups the free invariants by the contract each describes: the one
-    /// it names, or the only contract of the module.
+    fn message_claim(&mut self, file: &Path, path: &[String], function: &RawFn, kind: MessageKind) {
+        let marker = match kind {
+            MessageKind::Ensures => "ensures",
+            MessageKind::Reverts => "reverts",
+        };
+        let options = self.options(file, &function.attrs, marker, &["message", "contract"]);
+        let Some(message) = options.get("message").cloned() else {
+            self.error(
+                file,
+                function.line,
+                format!("`#[{marker}]` names its message: `#[{marker}(message = \"Name\")]`"),
+            );
+            return;
+        };
+        if function.has_self
+            || function.generic
+            || function.result.as_deref() != Some("bool")
+            || !function.effects.is_empty()
+        {
+            self.error(
+                file,
+                function.line,
+                format!(
+                    "a `#[{marker}]` function takes storage fields, message fields and the \
+                     context by name and returns `bool`, without `self`, type parameters or effects"
+                ),
+            );
+            return;
+        }
+        self.message_claims.push((
+            MessageClaim {
+                name: function.name.clone(),
+                path: path.to_vec(),
+                kind,
+                message,
+                location: Location {
+                    file: file.to_path_buf(),
+                    line: function.line,
+                },
+            },
+            options.get("contract").cloned(),
+        ));
+    }
+
+    /// The contract a free invariant or message claim describes: the one it
+    /// names, or the only contract of the module.
+    fn contract_for(
+        &mut self,
+        location: &Location,
+        named: &Option<String>,
+    ) -> Option<(RawContract, Vec<String>, PathBuf)> {
+        let candidates: Vec<&(RawContract, Vec<String>, PathBuf)> = self
+            .deployed
+            .iter()
+            .filter(|(contract, _, _)| named.as_ref().is_none_or(|name| *name == contract.name))
+            .collect();
+        let message = match (candidates.as_slice(), named) {
+            ([only], _) => return Some((*only).clone()),
+            ([], Some(name)) => format!("there is no contract `{name}` in this module"),
+            ([], None) => {
+                "an `#[invariant]` outside a `#[machine]`, `#[ensures]` and `#[reverts]` \
+                 describe a contract, but this module declares no contract"
+                    .to_string()
+            }
+            (_, _) => "this module declares several contracts; name one with \
+                 `contract = \"Name\"`"
+                .to_string(),
+        };
+        let (file, line) = (location.file.clone(), location.line);
+        self.error(&file, line, message);
+        None
+    }
+
+    fn claim_entry(
+        claims: &mut Vec<StorageClaim>,
+        (contract, path, file): (RawContract, Vec<String>, PathBuf),
+    ) -> &mut StorageClaim {
+        if let Some(index) = claims.iter().position(|claim| claim.name == contract.name) {
+            return &mut claims[index];
+        }
+        claims.push(StorageClaim {
+            name: contract.name.clone(),
+            path,
+            invariants: Vec::new(),
+            claims_invariants: true,
+            messages: Vec::new(),
+            location: Location {
+                file,
+                line: contract.line,
+            },
+        });
+        claims.last_mut().expect("just pushed")
+    }
+
+    /// Groups the free invariants and message claims by the contract each
+    /// describes.
     fn resolve_storage(&mut self) -> Vec<StorageClaim> {
         let mut claims: Vec<StorageClaim> = Vec::new();
         for (invariant, named) in std::mem::take(&mut self.storage_invariants) {
-            let candidates: Vec<&(RawContract, Vec<String>, PathBuf)> = self
-                .deployed
-                .iter()
-                .filter(|(contract, _, _)| named.as_ref().is_none_or(|name| *name == contract.name))
-                .collect();
-            let (contract, path, file) = match (candidates.as_slice(), &named) {
-                ([only], _) => (*only).clone(),
-                ([], Some(name)) => {
-                    let (file, line) = (invariant.location.file.clone(), invariant.location.line);
-                    self.error(
-                        &file,
-                        line,
-                        format!("there is no contract `{name}` in this module"),
-                    );
-                    continue;
-                }
-                ([], None) => {
-                    let (file, line) = (invariant.location.file.clone(), invariant.location.line);
-                    self.error(
-                        &file,
-                        line,
-                        "an `#[invariant]` outside a `#[machine]` describes a contract's \
-                         storage, but this module declares no contract",
-                    );
-                    continue;
-                }
-                (_, _) => {
-                    let (file, line) = (invariant.location.file.clone(), invariant.location.line);
-                    self.error(
-                        &file,
-                        line,
-                        "this module declares several contracts; name one with \
-                         `#[invariant(contract = \"Name\")]`",
-                    );
-                    continue;
-                }
-            };
-            match claims.iter_mut().find(|claim| claim.name == contract.name) {
-                Some(claim) => claim.invariants.push(invariant),
-                None => claims.push(StorageClaim {
-                    name: contract.name.clone(),
-                    path,
-                    invariants: vec![invariant],
-                    location: Location {
-                        file,
-                        line: contract.line,
-                    },
-                }),
+            if let Some(contract) = self.contract_for(&invariant.location, &named) {
+                Self::claim_entry(&mut claims, contract)
+                    .invariants
+                    .push(invariant);
+            }
+        }
+        for (message, named) in std::mem::take(&mut self.message_claims) {
+            if let Some(contract) = self.contract_for(&message.location, &named) {
+                Self::claim_entry(&mut claims, contract)
+                    .messages
+                    .push(message);
             }
         }
         claims
@@ -735,6 +799,12 @@ impl Builder {
                     .map(|c| (c.name.clone(), c.location.clone())),
             )
             .chain(storage.iter().map(|c| (c.name.clone(), c.location.clone())))
+            .chain(
+                storage
+                    .iter()
+                    .flat_map(|c| &c.messages)
+                    .map(|m| (m.name.clone(), m.location.clone())),
+            )
             .collect();
         for (name, location) in entries {
             if let Some(first) = seen.get(&name) {
@@ -751,6 +821,16 @@ impl Builder {
 
 fn has(attrs: &[Attr], name: &str) -> bool {
     attrs.iter().any(|attr| attr.name == name)
+}
+
+fn message_kind(attrs: &[Attr]) -> Option<MessageKind> {
+    if has(attrs, "ensures") {
+        Some(MessageKind::Ensures)
+    } else if has(attrs, "reverts") {
+        Some(MessageKind::Reverts)
+    } else {
+        None
+    }
 }
 
 fn is_method_marker(name: &str) -> bool {

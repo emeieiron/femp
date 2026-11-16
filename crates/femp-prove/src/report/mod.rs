@@ -52,6 +52,8 @@ pub enum ClaimKind {
     Spec,
     /// A deployed contract whose storage invariants hold after every message.
     Contract,
+    /// What one message of a contract does.
+    Message,
 }
 
 impl ClaimKind {
@@ -62,6 +64,7 @@ impl ClaimKind {
             Self::Machine => "machine",
             Self::Spec => "spec",
             Self::Contract => "contract",
+            Self::Message => "message",
         }
     }
 }

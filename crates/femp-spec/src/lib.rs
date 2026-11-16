@@ -9,7 +9,8 @@ pub mod discover;
 pub mod domain;
 
 pub use claims::{
-    Claims, Contract, ContractMode, SpecParam, StorageClaim, StorageInvariant, TargetRef,
+    Claims, Contract, ContractMode, MessageClaim, MessageKind, SpecParam, StorageClaim,
+    StorageInvariant, TargetRef,
 };
 pub use counterexample::{Arg, Counterexample, StepReport};
 pub use discover::{DiscoveryError, discover};

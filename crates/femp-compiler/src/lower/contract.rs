@@ -32,6 +32,28 @@ pub struct ContractRoot {
     pub path: Vec<String>,
     pub name: String,
     pub invariants: Vec<Root>,
+    pub messages: Vec<MessageRoot>,
+}
+
+/// A function that states what one message does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageRoot {
+    pub root: Root,
+    /// The message variant, such as `Transfer`.
+    pub message: String,
+    /// Whether the function sees the storage after the message too.
+    pub after: bool,
+}
+
+/// A message claim as a function of the storage before the message, the
+/// storage after it when it sees that, the arguments of the message's
+/// handler, and the values it ranges over.
+#[derive(Debug, Clone)]
+pub struct LoweredMessage {
+    /// The index of the message's arm among the contract's.
+    pub arm: usize,
+    pub func: FuncId,
+    pub params: Vec<Param>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +68,8 @@ pub struct LoweredContract {
     /// Each invariant as a function of the storage and of what else it
     /// ranges over.
     pub invariants: Vec<Invariant>,
+    /// Each message claim, or why it cannot be lowered.
+    pub messages: Vec<Result<LoweredMessage, Unsupported>>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,11 +105,25 @@ pub struct Invariant {
     pub params: Vec<Param>,
 }
 
-/// Where an invariant's parameter comes from.
+/// Where an invariant's or a message claim's parameter comes from.
 #[derive(Debug, Clone)]
 enum Source {
     Field(usize),
+    /// A field after the message.
+    After(usize),
+    /// An argument of the message.
+    Message(usize),
+    /// A context field, as the parameter's type holds it.
+    Context(usize, Type),
     Every(Input),
+}
+
+/// A message claim lowered, before it is wrapped.
+struct PendingMessage {
+    arm: usize,
+    func: FuncId,
+    sources: Vec<Source>,
+    after: bool,
 }
 
 /// A handler lowered, before it is wrapped.
@@ -105,6 +143,7 @@ pub(super) struct Lowering {
     arms: Vec<Pending>,
     /// Each invariant and where each of its parameters comes from.
     invariants: Vec<(FuncId, Vec<Source>)>,
+    messages: Vec<Result<PendingMessage, Unsupported>>,
     name: String,
 }
 
@@ -213,13 +252,100 @@ impl<'db> Lowerer<'db> {
             }
             invariants.push((id, sources));
         }
+        let messages = root
+            .messages
+            .iter()
+            .map(|message| self.message_claim(message, &arms, &names, &state))
+            .collect();
         Ok(Lowering {
             state,
             fields: names,
             init,
             arms,
             invariants,
+            messages,
             name: root.name.clone(),
+        })
+    }
+
+    /// Lowers a message claim, and finds where each of its parameters
+    /// comes from: the storage before or after, the message, the context,
+    /// or every value.
+    fn message_claim(
+        &mut self,
+        claim: &MessageRoot,
+        arms: &[Pending],
+        fields: &[String],
+        state: &Type,
+    ) -> Result<PendingMessage, Unsupported> {
+        let db = self.db;
+        let func = self.find_root(&claim.root)?;
+        let id = self.root(func)?;
+        self.check_reachable(id)?;
+        let function = self.program.function(id).clone();
+        let arm = arms
+            .iter()
+            .position(|arm| arm.name == claim.message)
+            .ok_or_else(|| {
+                Unsupported::new(
+                    function.span.clone(),
+                    format!("the contract receives no message `{}`", claim.message),
+                )
+            })?;
+        let Type::Tuple(types) = state else {
+            unreachable!("the storage is a tuple");
+        };
+        let mismatch = |name: &str| {
+            Unsupported::new(
+                function.span.clone(),
+                format!("the parameter `{name}` does not have the type of what it names"),
+            )
+        };
+        let mut sources = Vec::new();
+        for (param, name) in function.params.iter().zip(param_names(db, func)) {
+            let ty = function.ty(*param).clone();
+            let source = if let Some(field) = fields.iter().position(|field| *field == name) {
+                (ty == types[field]).then_some(Source::Field(field))
+            } else if let Some(field) = name
+                .strip_suffix("_after")
+                .filter(|_| claim.after)
+                .and_then(|field| fields.iter().position(|known| known == field))
+            {
+                (ty == types[field]).then_some(Source::After(field))
+            } else if let Some(index) = arms[arm]
+                .params
+                .iter()
+                .position(|input| input.param.name == name)
+            {
+                (ty == arms[arm].params[index].ty).then_some(Source::Message(index))
+            } else if let Some(field) = CONTEXT
+                .iter()
+                .position(|(_, shown)| shown.strip_prefix("ctx.") == Some(name.as_str()))
+            {
+                let fits = ty == Type::uint(256)
+                    || (ADDRESSES.contains(&CONTEXT[field].1)
+                        && is_address(&self.types.table, &ty));
+                fits.then_some(Source::Context(field, ty))
+            } else {
+                Some(Source::Every(self.input(
+                    name.clone(),
+                    &ty,
+                    &function.span,
+                )?))
+            };
+            sources.push(source.ok_or_else(|| mismatch(&name))?);
+        }
+        if function.result != Type::Bool {
+            return Err(Unsupported::new(
+                function.span.clone(),
+                "a message claim must return `bool`",
+            ));
+        }
+        Ok(PendingMessage {
+            arm,
+            func: id,
+            sources,
+            after: claim.after,
         })
     }
 
@@ -490,7 +616,9 @@ impl Lowering {
         let evm = lx.types.evm();
         let table = lx.types.table.clone();
         let init = match &self.init {
-            Some(pending) => wrap_handler(lx, &self, pending, &evm, &table, false),
+            Some(pending) => {
+                wrap_handler(lx, &self, pending, &evm, &table, false, &BTreeSet::new())
+            }
             None => {
                 let mut function = Function::new(
                     format!("{}::init", self.name),
@@ -511,10 +639,28 @@ impl Lowering {
                 }
             }
         };
-        let arms = self
+        // A message's handler also takes the context its claims name.
+        let mut named = vec![BTreeSet::new(); self.arms.len()];
+        for message in self.messages.iter().flatten() {
+            for source in &message.sources {
+                if let Source::Context(field, _) = source {
+                    named[message.arm].insert(*field);
+                }
+            }
+        }
+        let arms: Vec<Handler> = self
             .arms
             .iter()
-            .map(|pending| wrap_handler(lx, &self, pending, &evm, &table, true))
+            .zip(&named)
+            .map(|(pending, named)| wrap_handler(lx, &self, pending, &evm, &table, true, named))
+            .collect();
+        let messages = self
+            .messages
+            .iter()
+            .map(|message| match message {
+                Ok(message) => Ok(wrap_message(lx, &self, message, &arms[message.arm])),
+                Err(error) => Err(error.clone()),
+            })
             .collect();
         let invariants = self
             .invariants
@@ -557,6 +703,7 @@ impl Lowering {
                             let (input, chosen) = every_values.next().expect("one per source");
                             value_of(&mut cursor, input, *chosen)
                         }
+                        _ => unreachable!("an invariant's parameters are fields or every value"),
                     })
                     .collect();
                 let holds = cursor.call(*func, args, Type::Bool);
@@ -573,6 +720,7 @@ impl Lowering {
             init,
             arms,
             invariants,
+            messages,
         }
     }
 }
@@ -584,6 +732,7 @@ fn wrap_handler(
     evm: &Type,
     table: &TypeTable,
     takes_storage: bool,
+    named: &BTreeSet<usize>,
 ) -> Handler {
     let handler = lx.program.function(pending.func);
     let mut function = Function::new(
@@ -596,7 +745,9 @@ fn wrap_handler(
         function.params.push(value);
         value
     });
-    let context: Vec<usize> = context_reads(&lx.program, pending.func, evm)
+    let mut reads = context_reads(&lx.program, pending.func, evm);
+    reads.extend(named);
+    let context: Vec<usize> = reads
         .into_iter()
         .filter(|field| pending.payable || *field != VALUE)
         .collect();
@@ -682,6 +833,114 @@ fn wrap_handler(
         params,
         payable: pending.payable,
         selector: pending.selector,
+    }
+}
+
+/// A message claim as a function of the storage before and after, the
+/// arguments its handler's wrapper takes, and the values it ranges over.
+fn wrap_message(
+    lx: &mut Lowerer<'_>,
+    contract: &Lowering,
+    message: &PendingMessage,
+    arm: &Handler,
+) -> LoweredMessage {
+    let claim = lx.program.function(message.func);
+    let (name, span) = (claim.name.clone(), claim.span.clone());
+    let mut function = Function::new(format!("{}::{name}", contract.name), Type::Bool, span);
+    let before = function.new_value(contract.state.clone(), Some("storage".to_string()));
+    function.params.push(before);
+    let after = message.after.then(|| {
+        let value = function.new_value(contract.state.clone(), Some("after".to_string()));
+        function.params.push(value);
+        value
+    });
+    let handler_args: Vec<femp_vir::ValueId> = arm
+        .params
+        .iter()
+        .map(|param| {
+            let value = function.new_value(vir_type(param.ty), Some(param.name.clone()));
+            function.params.push(value);
+            value
+        })
+        .collect();
+    let mut every = Vec::new();
+    for source in &message.sources {
+        if let Source::Every(input) = source {
+            let value =
+                function.new_value(vir_type(input.param.ty), Some(input.param.name.clone()));
+            function.params.push(value);
+            every.push((input.clone(), value));
+        }
+    }
+    let block = function.entry;
+    let mut cursor = Cursor::new(&mut function, block);
+    let Type::Tuple(types) = &contract.state else {
+        unreachable!("the storage is a tuple");
+    };
+    let pending_arm = &contract.arms[message.arm];
+    let mut every_values = every.iter();
+    let args = message
+        .sources
+        .iter()
+        .map(|source| match source {
+            Source::Field(field) | Source::After(field) => {
+                let storage = match source {
+                    Source::After(_) => after.expect("an after claim takes the storage after"),
+                    _ => before,
+                };
+                cursor.def(
+                    types[*field].clone(),
+                    Expr::Project {
+                        value: storage,
+                        path: vec![Proj::Field(*field as u16)],
+                    },
+                )
+            }
+            Source::Message(index) => value_of(
+                &mut cursor,
+                &pending_arm.params[*index],
+                handler_args[arm.context + *index],
+            ),
+            Source::Context(field, ty) => {
+                let shown = CONTEXT[*field].1;
+                let held = arm
+                    .params
+                    .iter()
+                    .position(|param| param.name == shown)
+                    .map(|position| (handler_args[position], arm.params[position].ty));
+                match held {
+                    Some((value, chosen)) => value_of(
+                        &mut cursor,
+                        &Input {
+                            param: Param {
+                                name: shown.to_string(),
+                                label: None,
+                                ty: chosen,
+                                generator: "any".to_string(),
+                            },
+                            ty: ty.clone(),
+                        },
+                        value,
+                    ),
+                    // Only a payable handler receives value.
+                    None => cursor.int(
+                        ty,
+                        Value::from_u128(Ty::Uint(256), 0).expect("zero is a u256"),
+                    ),
+                }
+            }
+            Source::Every(_) => {
+                let (input, chosen) = every_values.next().expect("one per source");
+                value_of(&mut cursor, input, *chosen)
+            }
+        })
+        .collect();
+    let holds = cursor.call(message.func, args, Type::Bool);
+    cursor.terminate(femp_vir::Terminator::Return(holds));
+    LoweredMessage {
+        arm: message.arm,
+        func: lx.program.push(function),
+        params: every.into_iter().map(|(input, _)| input.param).collect(),
     }
 }
 

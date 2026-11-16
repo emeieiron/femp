@@ -7,17 +7,20 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use femp_compiler::{ContractRoot, LoweredContract, Root, Session, Target, Unsupported};
+use femp_compiler::{
+    ContractRoot, LoweredContract, MessageRoot, Root, Session, Target, Unsupported,
+};
 use femp_core::project::Module;
 use femp_core::property::{Machine, PropertyKind};
 use femp_prove::obligation::contract;
 use femp_prove::obligation::differential::{self, Side};
+use femp_prove::obligation::machine::MessageCheck;
 use femp_prove::obligation::machine::{self, MachineFns};
 use femp_prove::obligation::property;
 use femp_prove::passes;
 use femp_prove::report::ClaimKind;
 use femp_prove::{Dumps, NotSupported, Summary, Task, Verdict};
-use femp_spec::{Claims, Contract, ContractMode, StorageClaim, TargetRef};
+use femp_spec::{Claims, Contract, ContractMode, MessageKind, StorageClaim, TargetRef};
 use femp_vir::Program;
 
 /// The declaration a claim comes from, by its index in the module's claims.
@@ -28,6 +31,9 @@ pub enum Entry {
     Contract(usize),
     /// A deployed contract's storage invariants.
     Storage(usize),
+    /// A message claim of a deployed contract: the contract's index, and
+    /// the claim's among its messages.
+    Message(usize, usize),
 }
 
 /// What a task establishes for its claim.
@@ -37,6 +43,8 @@ pub enum Role {
     Init,
     Step(usize),
     Search,
+    /// A message claim at the end of a real sequence.
+    Reach(MessageCheck),
 }
 
 pub struct ClaimPlan {
@@ -56,6 +64,16 @@ pub struct ClaimPlan {
     pub machine: Option<Machine>,
     /// The selector of each of a contract's messages, for replay.
     pub selectors: Vec<Option<u32>>,
+    /// A message claim's function, message and the values it ranges over.
+    pub message: Option<MessageSide>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MessageSide {
+    pub func: femp_vir::FuncId,
+    pub command: usize,
+    pub params: Vec<femp_core::property::Param>,
+    pub kind: MessageKind,
 }
 
 pub struct MachineSide {
@@ -134,6 +152,7 @@ fn skeleton(
         machines: Vec::new(),
         machine: None,
         selectors: Vec::new(),
+        message: None,
     }
 }
 
@@ -188,13 +207,24 @@ pub fn skeletons(module: &Module, claims: &Claims) -> Vec<ClaimPlan> {
         ));
     }
     for (index, claim) in claims.storage.iter().enumerate() {
-        plans.push(skeleton(
-            module,
-            &claim.name,
-            ClaimKind::Contract,
-            claim.location.to_string(),
-            Entry::Storage(index),
-        ));
+        if claim.claims_invariants && !claim.invariants.is_empty() {
+            plans.push(skeleton(
+                module,
+                &claim.name,
+                ClaimKind::Contract,
+                claim.location.to_string(),
+                Entry::Storage(index),
+            ));
+        }
+        for (message_index, message) in claim.messages.iter().enumerate() {
+            plans.push(skeleton(
+                module,
+                &message.name,
+                ClaimKind::Message,
+                message.location.to_string(),
+                Entry::Message(index, message_index),
+            ));
+        }
     }
     plans
 }
@@ -207,6 +237,15 @@ fn contract_root(claim: &StorageClaim) -> ContractRoot {
             .invariants
             .iter()
             .map(|invariant| Root::function(&invariant.path, &invariant.name))
+            .collect(),
+        messages: claim
+            .messages
+            .iter()
+            .map(|message| MessageRoot {
+                root: Root::function(&message.path, &message.name),
+                message: message.message.clone(),
+                after: message.kind == MessageKind::Ensures,
+            })
             .collect(),
     }
 }
@@ -450,6 +489,50 @@ pub fn add_target(
                 plan.machine = Some(declared);
                 plan.selectors = contract.arms.iter().map(|arm| arm.selector).collect();
             }
+            Entry::Message(index, message_index) => {
+                let contract = match &lowered.contracts[index] {
+                    Ok(contract) => contract,
+                    Err(error) => {
+                        record(plan, Role::Main, label, not_supported(error));
+                        continue;
+                    }
+                };
+                let lowered_message = match &contract.messages[message_index] {
+                    Ok(message) => message,
+                    Err(error) => {
+                        record(plan, Role::Main, label, not_supported(error));
+                        continue;
+                    }
+                };
+                let claim = &claims.storage[index];
+                let kind = claim.messages[message_index].kind;
+                let (declared, fns) = contract_machine(claim, contract);
+                let side = MessageSide {
+                    func: lowered_message.func,
+                    command: lowered_message.arm,
+                    params: lowered_message.params.clone(),
+                    kind,
+                };
+                for (role, check) in message_checks(kind) {
+                    let built = machine::message_task(
+                        program,
+                        &fns,
+                        &declared,
+                        &message_fn(&plan.name, &side),
+                        check,
+                    );
+                    add_built(plan, role, built, &context);
+                }
+                plan.machines.push(MachineSide {
+                    targets: vec![label.to_string()],
+                    program: program.clone(),
+                    fns,
+                    summaries: available.clone(),
+                });
+                plan.machine = Some(declared);
+                plan.selectors = contract.arms.iter().map(|arm| arm.selector).collect();
+                plan.message = Some(side);
+            }
         }
     }
     Ok(())
@@ -555,6 +638,7 @@ fn add_tasks(plan: &mut ClaimPlan, role: Role, tasks: Vec<Task>, label: &str, op
         Role::Init => ".init".to_string(),
         Role::Step(command) => format!(".step{command}"),
         Role::Search => ".search".to_string(),
+        Role::Reach(check) => format!(".reach-{check:?}").to_lowercase(),
     };
     let count = scoped.len();
     let dumps = (0..count)
@@ -642,10 +726,86 @@ pub fn compare_sides(plans: &mut [ClaimPlan], claims: &Claims, options: &Options
     }
 }
 
+/// The checks of a message claim, with the role each task plays.
+fn message_checks(kind: MessageKind) -> Vec<(Role, MessageCheck)> {
+    match kind {
+        MessageKind::Ensures => vec![(Role::Main, MessageCheck::Ensures)],
+        MessageKind::Reverts => vec![
+            (Role::Step(0), MessageCheck::Reverts),
+            (Role::Step(1), MessageCheck::GoesThrough),
+        ],
+    }
+}
+
+fn message_fn<'a>(name: &'a str, side: &'a MessageSide) -> machine::MessageFn<'a> {
+    machine::MessageFn {
+        name,
+        func: side.func,
+        command: side.command,
+        params: &side.params,
+    }
+}
+
+/// Adds, for each message claim whose check failed from a state the
+/// invariants allow, a search for a real sequence that ends in the message.
+fn add_message_searches(plan: &mut ClaimPlan, options: &Options) {
+    let (Some(declared), Some(side)) = (plan.machine.clone(), plan.message.clone()) else {
+        return;
+    };
+    let sides = std::mem::take(&mut plan.machines);
+    for machine_side in sides {
+        for (role, check) in message_checks(side.kind) {
+            let failed = plan.results.iter().any(|pending| {
+                matches!(pending, Pending::Done(done)
+                    if done.role == role
+                        && done.targets.iter().any(|t| machine_side.targets.contains(t))
+                        && !done.verdict.is_proved())
+            });
+            if !failed {
+                continue;
+            }
+            let tasks: Result<Vec<Task>, String> = (0..options.steps)
+                .map(|before| {
+                    let mut task = machine::message_search_task(
+                        &machine_side.program,
+                        &machine_side.fns,
+                        &declared,
+                        &message_fn(&plan.name, &side),
+                        check,
+                        before,
+                    )?;
+                    task.summaries = machine_side.summaries.clone();
+                    Ok(task)
+                })
+                .collect();
+            for target in &machine_side.targets {
+                match &tasks {
+                    Ok(tasks) => {
+                        add_tasks(plan, Role::Reach(check), tasks.clone(), target, options)
+                    }
+                    Err(message) => record(
+                        plan,
+                        Role::Reach(check),
+                        target,
+                        Verdict::NotSupported(NotSupported::new(
+                            Default::default(),
+                            message.clone(),
+                        )),
+                    ),
+                }
+            }
+        }
+    }
+}
+
 /// Adds a bounded search from `#[init]` for each machine program whose
 /// induction failed.
 pub fn add_searches(plans: &mut [ClaimPlan], claims: &Claims, options: &Options) {
     for plan in plans.iter_mut() {
+        if matches!(plan.entry, Entry::Message(..)) {
+            add_message_searches(plan, options);
+            continue;
+        }
         let declared = match plan.entry {
             Entry::Machine(index) => claims.suite.machines[index].clone(),
             Entry::Storage(_) => match &plan.machine {

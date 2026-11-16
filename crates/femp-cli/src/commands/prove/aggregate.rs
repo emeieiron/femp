@@ -77,6 +77,11 @@ impl Places {
 pub enum ReplayCase {
     Args(Vec<Value>),
     Sequence(Sequence),
+    /// A sequence whose last transaction goes through, or reverts.
+    Transactions {
+        sequence: Sequence,
+        last_goes_through: bool,
+    },
 }
 
 fn done(plan: &ClaimPlan) -> impl Iterator<Item = &Done> {
@@ -174,6 +179,7 @@ pub fn report(
             Some(machine) => machine_status(plan, machine, places),
             None => (None, None),
         },
+        Entry::Message(..) => message_status(plan, places),
     };
     let status = status.unwrap_or_else(|| {
         if let Some(reason) = unknown {
@@ -374,6 +380,79 @@ fn machine_status(
     if let Some(steps) = searched(plan) {
         reason.push_str(&format!(
             "\nno sequence of up to {steps} commands from `{}` breaks it, so the invariants are not inductive",
+            machine.init.name
+        ));
+    }
+    (Some(ClaimStatus::Unknown { reason }), None)
+}
+
+/// A message claim is refuted by a real sequence that ends in the message;
+/// a failure from a state only the invariants allow leaves it unknown.
+fn message_status(plan: &ClaimPlan, places: &Places) -> (Option<ClaimStatus>, Option<ReplayCase>) {
+    let (Some(machine), Some(side)) = (&plan.machine, &plan.message) else {
+        return (None, None);
+    };
+    let reached = refuted(plan, |role| matches!(role, Role::Reach(_)));
+    if let Some((done, refutation)) = reached
+        && !precondition(refutation)
+        && let Role::Reach(check) = done.role
+        && let Some(sequence) =
+            machine::decode_message(machine, side.command, done.index, &refutation.values)
+    {
+        let message = &machine.commands[side.command].method.name;
+        let what = match &refutation.check {
+            Check::Panic(kind) if check == machine::MessageCheck::GoesThrough => format!(
+                "`{message}` reverts ({kind}) at {} although `{}` does not hold",
+                places.show(&refutation.span),
+                plan.name
+            ),
+            other => failure(other, &refutation.span, places),
+        };
+        let status = refuted_status(
+            what,
+            sequence_counterexample(machine, &sequence),
+            done.targets.clone(),
+        );
+        let replay = ReplayCase::Transactions {
+            sequence,
+            last_goes_through: check != machine::MessageCheck::GoesThrough,
+        };
+        return (Some(status), Some(replay));
+    }
+    let failed = refuted(plan, |role| matches!(role, Role::Main | Role::Step(_)));
+    let Some((done_task, refutation)) = failed else {
+        return (None, None);
+    };
+    if precondition(refutation) {
+        return (Some(open_precondition(refutation, places)), None);
+    }
+    let with: Vec<String> = refutation
+        .shown
+        .iter()
+        .map(|(name, value)| format!("{name} = {value}"))
+        .collect();
+    let message = &machine.commands[side.command].method.name;
+    let what = match (&refutation.check, done_task.role) {
+        // Where the claim says the message goes through, any panic is a
+        // revert the claim did not foresee.
+        (Check::Panic(kind), Role::Step(1)) => format!(
+            "`{message}` reverts ({kind}) at {} although `{}` does not hold",
+            places.show(&refutation.span),
+            plan.name
+        ),
+        (check, _) => failure(check, &refutation.span, places),
+    };
+    let mut reason = format!(
+        "{what}, from a state the invariants allow: {}",
+        with.join(", ")
+    );
+    let searched = done(plan)
+        .filter(|done| matches!(done.role, Role::Reach(_)))
+        .map(|done| done.index + 1)
+        .max();
+    if let Some(steps) = searched {
+        reason.push_str(&format!(
+            "\nno sequence of up to {steps} messages from `{}` that ends in `{message}` reaches such a state; stronger invariants may prove it",
             machine.init.name
         ));
     }

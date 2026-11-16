@@ -37,7 +37,16 @@ impl Claims {
             .retain(|machine| machine.name.contains(pattern));
         self.contracts
             .retain(|contract| contract.name.contains(pattern));
-        self.storage.retain(|claim| claim.name.contains(pattern));
+        for claim in &mut self.storage {
+            // Message claims still assume the invariants, unproved.
+            claim.claims_invariants &= claim.name.contains(pattern);
+            claim
+                .messages
+                .retain(|message| message.name.contains(pattern));
+        }
+        self.storage.retain(|claim| {
+            (claim.claims_invariants && !claim.invariants.is_empty()) || !claim.messages.is_empty()
+        });
     }
 }
 
@@ -50,6 +59,33 @@ pub struct StorageClaim {
     /// The module path of the contract inside its ingot.
     pub path: Vec<String>,
     pub invariants: Vec<StorageInvariant>,
+    /// Whether the invariants are claimed, rather than only assumed by the
+    /// message claims.
+    pub claims_invariants: bool,
+    /// What single messages do: `#[ensures]` and `#[reverts]` functions.
+    pub messages: Vec<MessageClaim>,
+    pub location: Location,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageKind {
+    /// Holds after every transaction of the message that goes through.
+    Ensures,
+    /// The message reverts exactly when it holds.
+    Reverts,
+}
+
+/// A free function that states what one message of a contract does. Its
+/// parameters name the storage before the message by its fields, after it
+/// as `<field>_after`, the message's fields, and the context (`caller`,
+/// `value`, `timestamp`, ...); any other parameter ranges over every value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageClaim {
+    pub name: String,
+    pub path: Vec<String>,
+    pub kind: MessageKind,
+    /// The message variant the claim is about, such as `Transfer`.
+    pub message: String,
     pub location: Location,
 }
 
