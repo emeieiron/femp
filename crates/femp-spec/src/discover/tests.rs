@@ -6,6 +6,7 @@ use femp_core::project::{Module, ModuleRole};
 use femp_core::property::{PropertyKind, Ty};
 
 use super::*;
+use crate::claims::ContractMode;
 
 fn module(files: &[(&str, &str)], role: ModuleRole) -> (tempfile::TempDir, Module) {
     let dir = tempfile::tempdir().unwrap();
@@ -31,7 +32,9 @@ fn module(files: &[(&str, &str)], role: ModuleRole) -> (tempfile::TempDir, Modul
 
 fn shared(files: &[(&str, &str)]) -> Result<Suite, Vec<String>> {
     let (_dir, module) = module(files, ModuleRole::Shared);
-    discover(&module).map_err(|errors| errors.iter().map(|e| e.message.clone()).collect())
+    discover(&module)
+        .map(|claims| claims.suite)
+        .map_err(|errors| errors.iter().map(|e| e.message.clone()).collect())
 }
 
 const PROPERTIES: &str = r#"
@@ -153,7 +156,7 @@ impl Driver {
         &[("lib.fe", source)],
         ModuleRole::Platform(PlatformId::new("evm")),
     );
-    let suite = discover(&module).unwrap();
+    let suite = discover(&module).unwrap().suite;
     let machine = &suite.machines[0];
     assert_eq!(machine.steps, DEFAULT_STEPS);
     assert!(machine.uses_effects());
@@ -271,4 +274,144 @@ fn rejects_entries_in_conditional_modules() {
 #[test]
 fn an_empty_module_has_an_empty_suite() {
     assert!(shared(&[("lib.fe", "pub fn f() {}\n")]).unwrap().is_empty());
+}
+
+fn claims(files: &[(&str, &str)]) -> Result<Claims, Vec<String>> {
+    let (_dir, module) = module(files, ModuleRole::Shared);
+    discover(&module).map_err(|errors| errors.iter().map(|e| e.message.clone()).collect())
+}
+
+const POSITION: &str = r#"
+pub struct Position { pub claimed: u64 }
+
+impl Position {
+    pub fn claim(self, amount: u64, now: u64) -> Position { self }
+}
+
+pub fn open(total: u64) -> Position { Position { claimed: 0 } }
+"#;
+
+const SPECS: &str = r#"
+use femp_spec::{requires, ensures}
+
+#[spec]
+#[gen(amount = "1..=10")]
+fn claim_spec(position: Position, amount: u64, now: u64) -> Position {
+    position.claim(amount, now)
+}
+
+#[spec(trusted, target = "position::open", timeout = 5)]
+pub fn opening(_ total: u64) -> Position {
+    open(total)
+}
+
+#[spec(prove, transparent, target = "Position::claim")]
+fn claim_again(position: Position, amount: u64, now: u64) -> Position {
+    position.claim(amount, now)
+}
+"#;
+
+#[test]
+fn finds_specs_and_resolves_their_targets() {
+    let claims = claims(&[
+        ("lib.fe", ""),
+        ("position.fe", POSITION),
+        ("specs.fe", SPECS),
+    ])
+    .unwrap();
+    assert!(claims.suite.is_empty());
+    let names: Vec<&str> = claims.contracts.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["claim_spec", "opening", "claim_again"]);
+
+    let claim = &claims.contracts[0];
+    assert_eq!(claim.path, ["specs"]);
+    assert_eq!(claim.mode, ContractMode::Prove);
+    assert!(!claim.transparent);
+    assert_eq!(claim.target.to_string(), "Position::claim");
+    assert_eq!(claim.target.path, ["position"]);
+    assert_eq!(claim.target.location.line, 5);
+    assert_eq!(claim.params[0].ty, None);
+    assert_eq!(claim.params[0].ty_text, "Position");
+    assert_eq!(claim.params[1].ty, Some(Ty::Uint(64)));
+    assert_eq!(claim.params[1].generator, "1..=10");
+
+    let opening = &claims.contracts[1];
+    assert_eq!(opening.mode, ContractMode::Trusted);
+    assert_eq!(opening.timeout, Some(5));
+    assert_eq!(opening.target.owner, None);
+    assert_eq!(opening.target.name, "open");
+    assert_eq!(opening.params[0].label, None);
+
+    assert!(claims.contracts[2].transparent);
+}
+
+#[test]
+fn reports_malformed_specs() {
+    let source = r#"
+#[spec]
+fn lonely(x: u64) -> u64 { x }
+
+#[spec(target = "missing")]
+fn missing_target(x: u64) -> u64 { x }
+
+#[spec(prove, trusted, fast)]
+fn mixed_spec(x: u64) -> u64 { x }
+
+#[spec(trusted, transparent, timeout = "soon", target = "helper")]
+fn helper_spec<T>(x: T) -> u64 { 1 }
+
+#[spec(target = "helper")]
+#[gen(p = "1..=2")]
+fn typed(p: Position) -> u64 { 1 }
+
+#[spec(target = "step")]
+fn ambiguous(x: u64) -> u64 { x }
+
+#[spec(target = "helper")]
+#[property]
+pub fn twice(x: u64) -> bool { true }
+
+pub fn helper() -> u64 { 1 }
+
+pub fn mixed() -> u64 { 1 }
+
+pub struct A {}
+impl A {
+    pub fn step(self) -> A { self }
+    #[spec]
+    fn inner_spec(self) -> A { self }
+}
+pub struct B {}
+impl B {
+    pub fn step(self) -> B { self }
+}
+"#;
+    let errors = claims(&[("lib.fe", source)]).unwrap_err();
+    for fragment in [
+        "names no target",
+        "`missing`, which is not a function of this module",
+        "either `prove` or `trusted`",
+        "`fast` is not one of them",
+        "cannot be `transparent`",
+        "`timeout` must be a whole number",
+        "cannot be generic",
+        "only `bool` and fixed-width integer parameters take generators",
+        "could be `A::step` at",
+        "either `#[spec]` or `#[property]`",
+        "belongs on a free function",
+    ] {
+        assert!(
+            errors.iter().any(|error| error.contains(fragment)),
+            "missing `{fragment}` in {errors:#?}"
+        );
+    }
+}
+
+#[test]
+fn spec_names_share_the_namespace_of_entry_points() {
+    let source = "pub fn f() -> bool { true }\n\
+                  #[property]\npub fn f_spec() -> bool { true }\n\
+                  #[spec(target = \"f\")]\nfn f_spec() -> bool { f() }\n";
+    let errors = claims(&[("lib.fe", source)]).unwrap_err();
+    assert!(errors[0].contains("must be unique"), "{errors:?}");
 }

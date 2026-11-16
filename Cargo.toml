@@ -17,6 +17,7 @@ femp-native = { path = "crates/femp-native" }
 femp-wasm = { path = "crates/femp-wasm" }
 femp-testing = { path = "crates/femp-testing" }
 femp-prop = { path = "crates/femp-prop" }
+femp-spec = { path = "crates/femp-spec" }
 femp-harness = { path = "crates/femp-harness" }
 
 anyhow = "1"

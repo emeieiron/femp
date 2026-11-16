@@ -10,9 +10,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use femp_core::property::{Ty, U256, Value};
+use femp_spec::domain::{BUILT_IN, Domain};
 
 use crate::choices::Choices;
-use crate::spec::{self, Spec};
 
 pub use int::IntRange;
 pub use pick::{Bools, Constant, OneOf};
@@ -40,29 +40,11 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// The built-in named generators: `one_of(..)` and `const(..)`.
+    /// The built-in generators: `any`, ranges, `one_of(..)` and `const(..)`.
     pub fn standard() -> Self {
-        let mut registry = Self {
+        Self {
             named: BTreeMap::new(),
-        };
-        registry.register(
-            "one_of",
-            Box::new(|ty, args| {
-                let values = args
-                    .iter()
-                    .map(|arg| literal(ty, arg))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Arc::new(OneOf::new(values)?))
-            }),
-        );
-        registry.register(
-            "const",
-            Box::new(|ty, args| match args {
-                [arg] => Ok(Arc::new(Constant::new(literal(ty, arg)?))),
-                _ => Err("`const` takes exactly one value".to_string()),
-            }),
-        );
-        registry
+        }
     }
 
     pub fn register(&mut self, name: &str, factory: Factory) {
@@ -70,32 +52,23 @@ impl Registry {
     }
 
     pub fn build(&self, ty: Ty, text: &str) -> Result<Shared, String> {
-        match spec::parse(text)? {
-            Spec::Any if ty == Ty::Bool => Ok(Arc::new(Bools)),
-            Spec::Any => Ok(Arc::new(IntRange::full(ty))),
-            Spec::Range { .. } if ty == Ty::Bool => {
-                Err("a `bool` takes `any`, `one_of(..)` or `const(..)`, not a range".to_string())
-            }
-            Spec::Range { lo, hi, inclusive } => {
-                let lo = bound(ty, &lo)?;
-                let mut hi = bound(ty, &hi)?;
-                if !inclusive {
-                    if hi <= lo {
-                        return Err(format!("the range `{text}` is empty"));
-                    }
-                    hi -= U256::from(1u8);
-                }
-                if hi < lo {
-                    return Err(format!("the range `{text}` is empty"));
-                }
-                Ok(Arc::new(IntRange::new(ty, lo, hi)))
-            }
-            Spec::Named { name, args } => match self.named.get(&name) {
+        match Domain::resolve(ty, text)? {
+            Domain::Any(Ty::Bool) => Ok(Arc::new(Bools)),
+            Domain::Any(ty) => Ok(Arc::new(IntRange::full(ty))),
+            Domain::Range { lo, hi } => Ok(Arc::new(IntRange::new(ty, lo.ordinal(), hi.ordinal()))),
+            Domain::OneOf(values) => Ok(Arc::new(OneOf::new(values)?)),
+            Domain::Const(value) => Ok(Arc::new(Constant::new(value))),
+            Domain::Custom { name, args } => match self.named.get(&name) {
                 Some(factory) => factory(ty, &args),
-                None => Err(format!(
-                    "unknown generator `{name}` (known: any, ranges, {})",
-                    self.named.keys().cloned().collect::<Vec<_>>().join(", ")
-                )),
+                None => {
+                    let mut known: Vec<&str> = BUILT_IN.to_vec();
+                    known.extend(self.named.keys().map(String::as_str));
+                    known.sort_unstable();
+                    Err(format!(
+                        "unknown generator `{name}` (known: any, ranges, {})",
+                        known.join(", ")
+                    ))
+                }
             },
         }
     }
@@ -105,19 +78,6 @@ impl Default for Registry {
     fn default() -> Self {
         Self::standard()
     }
-}
-
-/// A range bound as an ordinal: a literal, `min` or `max`.
-fn bound(ty: Ty, text: &str) -> Result<U256, String> {
-    match text {
-        "min" => Ok(U256::ZERO),
-        "max" => Ok(ty.max_ordinal()),
-        _ => literal(ty, text).map(|value| value.ordinal()),
-    }
-}
-
-fn literal(ty: Ty, text: &str) -> Result<Value, String> {
-    Value::parse(ty, text).ok_or_else(|| format!("`{text}` is not a `{ty}` value"))
 }
 
 #[cfg(test)]

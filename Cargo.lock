@@ -1235,6 +1235,7 @@ dependencies = [
  "femp-evm",
  "femp-native",
  "femp-prop",
+ "femp-spec",
  "femp-testing",
  "femp-toolchain",
  "femp-wasm",
@@ -1291,8 +1292,18 @@ name = "femp-prop"
 version = "0.1.0"
 dependencies = [
  "femp-core",
+ "femp-spec",
  "serde",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "femp-spec"
+version = "0.1.0"
+dependencies = [
+ "femp-core",
+ "serde",
  "tempfile",
 ]
 

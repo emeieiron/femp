@@ -6,12 +6,13 @@
 pub mod cases;
 pub mod choices;
 pub mod compare;
-pub mod discover;
 pub mod engine;
 pub mod generators;
 pub mod regress;
 pub mod report;
 pub mod rng;
 pub mod shrink;
-pub mod spec;
 pub mod verdict;
+
+pub use femp_spec::discover;
+pub use femp_spec::domain as spec;

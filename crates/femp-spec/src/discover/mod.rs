@@ -1,9 +1,10 @@
-//! Finds the property entry points of a module by reading its Fe sources:
-//! `#[property]` and `#[differential]` functions, and `#[machine]` structs
-//! with their `#[init]`, `#[command]`, `#[invariant]` and `#[observe]`
-//! methods. Attribute arguments carry the generator specifications and
-//! limits, so a property is declared in one place.
+//! Finds the claims of a module by reading its Fe sources: `#[property]`
+//! and `#[differential]` functions, `#[machine]` structs with their
+//! `#[init]`, `#[command]`, `#[invariant]` and `#[observe]` methods, and
+//! `#[spec]` functions. Attribute arguments carry the generator
+//! specifications and limits, so a claim is declared in one place.
 
+mod contracts;
 mod lex;
 mod parse;
 
@@ -19,6 +20,8 @@ use femp_core::property::{
 };
 use femp_core::source_tree::ModuleTree;
 
+use crate::claims::{Claims, Contract};
+use contracts::{Candidate, PendingSpec};
 use parse::{Attr, RawFn, RawModule, RawStruct};
 
 pub const DEFAULT_STEPS: &str = "1..=16";
@@ -35,9 +38,9 @@ impl fmt::Display for DiscoveryError {
     }
 }
 
-/// Reads every source of `module` and returns its suite, or every problem
-/// found in its declarations.
-pub fn discover(module: &Module) -> Result<Suite, Vec<DiscoveryError>> {
+/// Reads every source of `module` and returns its claims, or every problem
+/// found in their declarations.
+pub fn discover(module: &Module) -> Result<Claims, Vec<DiscoveryError>> {
     let source_dir = module.dir.join(SOURCE_DIR);
     let tree = ModuleTree::read(&source_dir).map_err(|error| {
         vec![DiscoveryError {
@@ -59,6 +62,9 @@ pub fn discover(module: &Module) -> Result<Suite, Vec<DiscoveryError>> {
             ingot: module.ingot.name.clone(),
             ..Suite::default()
         },
+        specs: Vec::new(),
+        candidates: Vec::new(),
+        contracts: Vec::new(),
     };
     for (path, file, source) in sources {
         let file = authored(module, &file);
@@ -66,9 +72,13 @@ pub fn discover(module: &Module) -> Result<Suite, Vec<DiscoveryError>> {
             builder.module(&file, &raw);
         }
     }
+    builder.resolve_specs();
     builder.check_names();
     if builder.errors.is_empty() {
-        Ok(builder.suite)
+        Ok(Claims {
+            suite: builder.suite,
+            contracts: builder.contracts,
+        })
     } else {
         Err(builder.errors)
     }
@@ -102,6 +112,10 @@ struct Builder {
     shared: bool,
     errors: Vec<DiscoveryError>,
     suite: Suite,
+    specs: Vec<PendingSpec>,
+    /// Every function and method a spec may name as its target.
+    candidates: Vec<Candidate>,
+    contracts: Vec<Contract>,
 }
 
 impl Builder {
@@ -116,6 +130,7 @@ impl Builder {
     }
 
     fn module(&mut self, file: &Path, raw: &RawModule) {
+        self.note_candidates(file, raw);
         for function in &raw.fns {
             for attr in &function.attrs {
                 if is_method_marker(&attr.name) {
@@ -129,6 +144,10 @@ impl Builder {
                     );
                 }
             }
+            if has(&function.attrs, "spec") {
+                self.pending_spec(file, raw, function);
+                continue;
+            }
             if let Some(kind) = self.property_kind(file, function) {
                 if raw.conditional {
                     self.error(
@@ -140,6 +159,15 @@ impl Builder {
                 if let Some(property) = self.property(file, &raw.path, function, kind) {
                     self.suite.properties.push(property);
                 }
+            }
+        }
+        for method in raw.impls.iter().flat_map(|item| &item.methods) {
+            if let Some(attr) = method.attrs.iter().find(|attr| attr.name == "spec") {
+                self.error(
+                    file,
+                    attr.line,
+                    "`#[spec]` belongs on a free function, not a method",
+                );
             }
         }
         let machines: BTreeSet<&str> = raw
@@ -459,7 +487,13 @@ impl Builder {
     }
 
     fn params(&mut self, file: &Path, function: &RawFn) -> Option<Vec<Param>> {
-        let mut generators: BTreeMap<String, String> = BTreeMap::new();
+        let generators = self.generators(file, function);
+        self.params_from(file, function, generators)
+    }
+
+    /// The `#[gen(..)]` specifications of a function, by parameter name.
+    fn generators(&mut self, file: &Path, function: &RawFn) -> BTreeMap<String, String> {
+        let mut generators = BTreeMap::new();
         for attr in function.attrs.iter().filter(|attr| attr.name == "gen") {
             for arg in &attr.args {
                 match &arg.key {
@@ -477,6 +511,15 @@ impl Builder {
                 }
             }
         }
+        generators
+    }
+
+    fn params_from(
+        &mut self,
+        file: &Path,
+        function: &RawFn,
+        mut generators: BTreeMap<String, String>,
+    ) -> Option<Vec<Param>> {
         let mut params = Vec::new();
         let mut valid = true;
         for raw in &function.params {
@@ -581,6 +624,11 @@ impl Builder {
                     .machines
                     .iter()
                     .map(|m| (m.name.clone(), m.location.clone())),
+            )
+            .chain(
+                self.contracts
+                    .iter()
+                    .map(|c| (c.name.clone(), c.location.clone())),
             )
             .collect();
         for (name, location) in entries {
