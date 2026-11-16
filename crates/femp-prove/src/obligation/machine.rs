@@ -7,7 +7,8 @@
 use femp_core::property::{Machine, Method, Sequence, Step, Ty, U256, Value};
 use femp_spec::Domain;
 use femp_vir::{
-    BinOp, Check, Const, Cursor, Expr, FuncId, Function, Program, Succ, Terminator, Type, ValueId,
+    BinOp, Check, Const, Cursor, Expr, FuncId, Function, Mode, Program, Succ, Terminator, Type,
+    ValueId,
 };
 
 use super::inputs::{assume_domain, choose};
@@ -72,7 +73,7 @@ impl<'a> Builder<'a> {
     /// that a panicking one fails too. In an assumed block, the invariants
     /// are assumed instead.
     fn check(&mut self, block: femp_vir::BlockId, state: ValueId, after: &str) {
-        let assumed = self.entry.block(block).assumed;
+        let assumed = self.entry.block(block).mode == Mode::Assumed;
         let invariants: Vec<(FuncId, String)> = self
             .fns
             .invariants
@@ -110,11 +111,9 @@ impl<'a> Builder<'a> {
         let mut program = self.program.clone();
         let entry = program.push(self.entry);
         Task {
-            program,
-            entry,
             inputs: self.inputs,
             assumed: self.assumed,
-            timeout: None,
+            ..Task::new(program, entry)
         }
     }
 }
@@ -159,7 +158,7 @@ pub fn step_task(
     // The hypothesis: the invariants hold of the arbitrary state, which is
     // also one they can be evaluated on without panicking.
     let hypothesis = builder.entry.new_block();
-    builder.entry.block_mut(hypothesis).assumed = true;
+    builder.entry.block_mut(hypothesis).mode = Mode::Assumed;
     let body = builder.entry.new_block();
     builder
         .cursor(first)
@@ -209,7 +208,7 @@ pub fn search_task(
         &format!("search {} in {steps} steps", machine.name),
     );
     let mut block = builder.entry.entry;
-    builder.entry.block_mut(block).assumed = steps > 0;
+    builder.entry.block_mut(block).mode = mode(steps > 0);
     let mut state = builder.init(block)?;
     builder.check(block, state, &format!("`{}`", machine.init.name));
     let count = machine.commands.len();
@@ -242,15 +241,15 @@ pub fn search_task(
         };
         let earlier = step < steps;
         let join = builder.entry.new_block();
-        builder.entry.block_mut(join).assumed = earlier;
+        builder.entry.block_mut(join).mode = mode(earlier);
         let next = builder.entry.new_value(state_ty.clone(), None);
         builder.entry.block_mut(join).params.push(next);
         for (index, command_args) in args.into_iter().enumerate() {
             let run = builder.entry.new_block();
-            builder.entry.block_mut(run).assumed = earlier;
+            builder.entry.block_mut(run).mode = mode(earlier);
             let rest = if index + 1 < count {
                 let rest = builder.entry.new_block();
-                builder.entry.block_mut(rest).assumed = earlier;
+                builder.entry.block_mut(rest).mode = mode(earlier);
                 rest
             } else {
                 run
@@ -285,6 +284,14 @@ pub fn search_task(
         state = next;
     }
     Ok(builder.finish(block))
+}
+
+fn mode(assumed: bool) -> Mode {
+    if assumed {
+        Mode::Assumed
+    } else {
+        Mode::Checked
+    }
 }
 
 /// The sequence a refuted search task's inputs describe.

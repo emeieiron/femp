@@ -1,0 +1,27 @@
+//! Statements of `#[spec]` functions. At run time they check what they
+//! state; `femp prove` reads them as logic instead: what a spec `requires`
+//! is assumed of its target's arguments, what it `ensures` is proved of the
+//! result, and an `invariant` holds on every iteration of a loop.
+
+/// Rejects the case unless `condition` holds.
+pub fn requires(_ condition: bool) {
+    if !condition {
+        core::panic()
+    }
+}
+
+/// Fails unless `condition` holds.
+pub fn ensures(_ condition: bool) {
+    assert(condition)
+}
+
+/// Fails unless `condition` holds. Written first in a loop body, it is the
+/// loop's invariant.
+pub fn invariant(_ condition: bool) {
+    assert(condition)
+}
+
+/// Whether `conclusion` follows from `premise`.
+pub fn implies(_ premise: bool, _ conclusion: bool) -> bool {
+    !premise || conclusion
+}

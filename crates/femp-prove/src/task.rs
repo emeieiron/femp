@@ -15,9 +15,38 @@ pub struct Task {
     /// What the task takes on trust, for the report's "assumed" section.
     pub assumed: Vec<String>,
     pub timeout: Option<Duration>,
+    /// Specs whose summaries stand in for calls to their targets.
+    pub summaries: Vec<Summary>,
+    /// The spec this task proves, whose own target call stays as it is.
+    pub proving: Option<Summary>,
+    /// The specs whose summaries the task used, which must hold for its
+    /// result to.
+    pub relies_on: Vec<String>,
+}
+
+/// A `#[spec]` function and the function it describes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub spec: FuncId,
+    pub target: FuncId,
+    pub name: String,
+    pub trusted: bool,
 }
 
 impl Task {
+    pub fn new(program: Program, entry: FuncId) -> Self {
+        Self {
+            program,
+            entry,
+            inputs: Vec::new(),
+            assumed: Vec::new(),
+            timeout: None,
+            summaries: Vec::new(),
+            proving: None,
+            relies_on: Vec::new(),
+        }
+    }
+
     pub fn entry(&self) -> &femp_vir::Function {
         self.program.function(self.entry)
     }

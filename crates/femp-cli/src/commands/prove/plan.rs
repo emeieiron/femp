@@ -10,13 +10,14 @@ use anyhow::{Result, anyhow};
 use femp_core::project::Module;
 use femp_core::property::{Machine, PropertyKind};
 use femp_frontend::{Loaded, Root, Unsupported};
+use femp_prove::obligation::contract;
 use femp_prove::obligation::differential::{self, Side};
 use femp_prove::obligation::machine::{self, MachineFns};
 use femp_prove::obligation::property;
 use femp_prove::passes;
 use femp_prove::report::ClaimKind;
-use femp_prove::{Dumps, NotSupported, Task, Verdict};
-use femp_spec::Claims;
+use femp_prove::{Dumps, NotSupported, Summary, Task, Verdict};
+use femp_spec::{Claims, Contract, ContractMode, TargetRef};
 use femp_vir::Program;
 
 /// The declaration a claim comes from, by its index in the module's claims.
@@ -55,11 +56,29 @@ pub struct MachineSide {
     pub targets: Vec<String>,
     pub program: Program,
     pub fns: MachineFns,
+    pub summaries: Vec<Summary>,
 }
 
 pub enum Pending {
     Job(Box<Job>),
     Done(Done),
+}
+
+impl ClaimPlan {
+    /// The specs any of the claim's proofs used.
+    pub fn relies_on(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for pending in &self.results {
+            if let Pending::Done(done) = pending {
+                for name in &done.relies_on {
+                    if !names.contains(name) {
+                        names.push(name.clone());
+                    }
+                }
+            }
+        }
+        names
+    }
 }
 
 pub struct Done {
@@ -69,6 +88,8 @@ pub struct Done {
     /// search took, less one.
     pub index: usize,
     pub verdict: Verdict,
+    /// The specs whose summaries the proof used.
+    pub relies_on: Vec<String>,
 }
 
 pub struct Job {
@@ -136,6 +157,7 @@ pub fn skeletons(module: &Module, claims: &Claims) -> Vec<ClaimPlan> {
                 role: Role::Main,
                 targets: Vec::new(),
                 index: 0,
+                relies_on: Vec::new(),
                 verdict: Verdict::NotSupported(NotSupported::new(
                     femp_vir::Span::new(
                         machine.location.file.display().to_string(),
@@ -169,6 +191,15 @@ struct Roots {
     roots: Vec<Root>,
     properties: Vec<usize>,
     machines: Vec<Option<usize>>,
+    /// Each spec's function, then its target.
+    contracts: Vec<usize>,
+}
+
+fn target_root(target: &TargetRef) -> Root {
+    match &target.owner {
+        Some(owner) => Root::method(&target.path, owner, &target.name),
+        None => Root::function(&target.path, &target.name),
+    }
 }
 
 fn roots(claims: &Claims) -> Roots {
@@ -189,11 +220,47 @@ fn roots(claims: &Claims) -> Roots {
             roots.push(Root::method(&machine.path, &machine.name, &method.name));
         }
     }
+    let mut contracts = Vec::new();
+    for contract in &claims.contracts {
+        contracts.push(roots.len());
+        roots.push(Root::function(&contract.path, &contract.name));
+        roots.push(target_root(&contract.target));
+    }
     Roots {
         roots,
         properties,
         machines,
+        contracts,
     }
+}
+
+type Lowered = [Result<femp_vir::FuncId, Unsupported>];
+
+fn contract_fns(
+    start: usize,
+    found: &Lowered,
+) -> Result<(femp_vir::FuncId, femp_vir::FuncId), Unsupported> {
+    Ok((found[start].clone()?, found[start + 1].clone()?))
+}
+
+/// The specs whose summaries may stand in for their targets in this
+/// program: every spec that lowered, except the transparent ones.
+fn summaries(claims: &Claims, wanted: &Roots, found: &Lowered) -> Vec<Summary> {
+    claims
+        .contracts
+        .iter()
+        .zip(&wanted.contracts)
+        .filter(|(declared, _)| !declared.transparent)
+        .filter_map(|(declared, start)| {
+            let (spec, target) = contract_fns(*start, found).ok()?;
+            Some(contract::summary(
+                spec,
+                target,
+                declared,
+                declared.mode == ContractMode::Trusted,
+            ))
+        })
+        .collect()
 }
 
 fn machine_fns(
@@ -229,6 +296,12 @@ pub fn add_target(
     let wanted = roots(claims);
     let lowered = loaded.lower(&wanted.roots);
     let program = &lowered.program;
+    let available = summaries(claims, &wanted, &lowered.roots);
+    let context = Context {
+        label,
+        options,
+        summaries: &available,
+    };
     for plan in plans.iter_mut() {
         match plan.entry {
             Entry::Property(index) => {
@@ -243,7 +316,7 @@ pub fn add_target(
                 match declared.kind {
                     PropertyKind::Holds => {
                         let built = property::task(program, func, declared);
-                        add_built(plan, Role::Main, built, label, options);
+                        add_built(plan, Role::Main, built, &context);
                     }
                     PropertyKind::Agrees => match differential::side(program, func) {
                         Ok(side) => add_side(plan, side, label),
@@ -264,21 +337,73 @@ pub fn add_target(
                     }
                 };
                 let init = machine::init_task(program, &fns, declared);
-                add_built(plan, Role::Init, init, label, options);
+                add_built(plan, Role::Init, init, &context);
                 for command in 0..declared.commands.len() {
                     let step = machine::step_task(program, &fns, declared, command);
-                    add_built(plan, Role::Step(command), step, label, options);
+                    add_built(plan, Role::Step(command), step, &context);
                 }
                 plan.machines.push(MachineSide {
                     targets: vec![label.to_string()],
                     program: program.clone(),
                     fns,
+                    summaries: available.clone(),
                 });
             }
-            Entry::Contract(_) => {}
+            Entry::Contract(index) => {
+                let declared = &claims.contracts[index];
+                match contract_fns(wanted.contracts[index], &lowered.roots) {
+                    Ok((spec, target)) => {
+                        add_contract(plan, declared, program, spec, target, &context)
+                    }
+                    Err(error) => record(plan, Role::Main, label, not_supported(&error)),
+                }
+            }
         }
     }
     Ok(())
+}
+
+/// What tasks for one target share while they are planned.
+struct Context<'a> {
+    label: &'a str,
+    options: &'a Options,
+    summaries: &'a [Summary],
+}
+
+fn add_contract(
+    plan: &mut ClaimPlan,
+    declared: &Contract,
+    program: &Program,
+    spec: femp_vir::FuncId,
+    target: femp_vir::FuncId,
+    context: &Context<'_>,
+) {
+    if declared.mode == ContractMode::Trusted {
+        if let Err(message) = contract::check_shape(program, spec, target, &declared.name) {
+            record(
+                plan,
+                Role::Main,
+                context.label,
+                Verdict::NotSupported(NotSupported::new(
+                    program.function(spec).span.clone(),
+                    message,
+                )),
+            );
+        }
+        return;
+    }
+    let others: Vec<Summary> = context
+        .summaries
+        .iter()
+        .filter(|summary| summary.name != declared.name)
+        .cloned()
+        .collect();
+    let built = contract::task(program, spec, target, declared);
+    let own = Context {
+        summaries: &others,
+        ..*context
+    };
+    add_built(plan, Role::Main, built, &own);
 }
 
 fn record(plan: &mut ClaimPlan, role: Role, label: &str, verdict: Verdict) {
@@ -287,22 +412,20 @@ fn record(plan: &mut ClaimPlan, role: Role, label: &str, verdict: Verdict) {
         targets: vec![label.to_string()],
         index: 0,
         verdict,
+        relies_on: Vec::new(),
     }));
 }
 
-fn add_built(
-    plan: &mut ClaimPlan,
-    role: Role,
-    built: Result<Task, String>,
-    label: &str,
-    options: &Options,
-) {
+fn add_built(plan: &mut ClaimPlan, role: Role, built: Result<Task, String>, context: &Context<'_>) {
     match built {
-        Ok(task) => add_tasks(plan, role, vec![task], label, options),
+        Ok(mut task) => {
+            task.summaries = context.summaries.to_vec();
+            add_tasks(plan, role, vec![task], context.label, context.options);
+        }
         Err(message) => record(
             plan,
             role,
-            label,
+            context.label,
             Verdict::NotSupported(NotSupported::new(Default::default(), message)),
         ),
     }
@@ -401,6 +524,7 @@ pub fn compare_sides(plans: &mut [ClaimPlan], claims: &Claims, options: &Options
                 targets: sides[0].0.clone(),
                 index: 0,
                 verdict: Verdict::Proved,
+                relies_on: Vec::new(),
             }));
             continue;
         }
@@ -413,7 +537,12 @@ pub fn compare_sides(plans: &mut [ClaimPlan], claims: &Claims, options: &Options
             );
             let label = format!("{}+{}", first_targets.join("+"), targets.join("+"));
             let built = differential::task(first, other, declared, &claim);
-            add_built(plan, Role::Main, built, &label, options);
+            let context = Context {
+                label: &label,
+                options,
+                summaries: &[],
+            };
+            add_built(plan, Role::Main, built, &context);
             if let Some(Pending::Job(job)) = plan.results.last_mut() {
                 job.targets = first_targets.iter().chain(targets).cloned().collect();
             }
@@ -441,7 +570,11 @@ pub fn add_searches(plans: &mut [ClaimPlan], claims: &Claims, options: &Options)
                 continue;
             }
             let tasks: Result<Vec<Task>, String> = (1..=options.steps)
-                .map(|steps| machine::search_task(&side.program, &side.fns, declared, steps))
+                .map(|steps| {
+                    let mut task = machine::search_task(&side.program, &side.fns, declared, steps)?;
+                    task.summaries = side.summaries.clone();
+                    Ok(task)
+                })
                 .collect();
             for target in &side.targets {
                 match &tasks {

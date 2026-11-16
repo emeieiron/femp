@@ -28,6 +28,36 @@ bb0:
   v7: () = ()  @src/lib.fe:42
   return v7  @src/lib.fe:42
 
+// after spec_shape
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  v6: bool = call f1(v0)  @src/lib.fe:42
+  assert v6 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+
+// after summaries
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  v6: bool = call f1(v0)  @src/lib.fe:42
+  assert v6 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+
 // after inline
 prove index_in_bounds() -> ()  @src/lib.fe:42
 bb0:

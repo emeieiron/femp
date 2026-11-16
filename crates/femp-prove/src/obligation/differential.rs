@@ -20,13 +20,7 @@ pub struct Side {
 }
 
 pub fn side(program: &Program, func: FuncId) -> Result<Side, NotSupported> {
-    let mut task = Task {
-        program: program.clone(),
-        entry: func,
-        inputs: Vec::new(),
-        assumed: Vec::new(),
-        timeout: None,
-    };
+    let mut task = Task::new(program.clone(), func);
     passes::run(&mut task, &passes::reduction(), &mut |_, _| {})?;
     let mut function = task.entry().clone();
     capture::capture(&mut function);
@@ -96,10 +90,8 @@ pub fn task(first: &Side, second: &Side, property: &Property, claim: &str) -> Re
     cursor.terminate(Terminator::Return(unit));
     let entry = program.push(entry);
     Ok(Task {
-        program,
-        entry,
         inputs,
         assumed,
-        timeout: None,
+        ..Task::new(program, entry)
     })
 }

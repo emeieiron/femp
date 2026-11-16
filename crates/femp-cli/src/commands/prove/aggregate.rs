@@ -95,6 +95,40 @@ fn refuted(plan: &ClaimPlan, wanted: impl Fn(Role) -> bool) -> Option<(&Done, &R
         })
 }
 
+/// Marks claims proved with specs that are not proved themselves as
+/// undecided: their proof holds only if those specs do.
+pub fn require_specs(reports: &mut [ClaimReport], relies_on: &[Vec<String>]) {
+    let unproved: Vec<(String, String)> = reports
+        .iter()
+        .filter(|report| report.kind == femp_prove::report::ClaimKind::Spec)
+        .filter(|report| {
+            !matches!(
+                report.status,
+                ClaimStatus::Proved | ClaimStatus::Skipped { .. }
+            )
+        })
+        .map(|report| (report.module.clone(), report.name.clone()))
+        .collect();
+    for (report, names) in reports.iter_mut().zip(relies_on) {
+        if !matches!(report.status, ClaimStatus::Proved) {
+            continue;
+        }
+        let missing: Vec<&String> = names
+            .iter()
+            .filter(|name| unproved.contains(&(report.module.clone(), (*name).clone())))
+            .collect();
+        if !missing.is_empty() {
+            let names: Vec<String> = missing.iter().map(|name| format!("`{name}`")).collect();
+            report.status = ClaimStatus::Unknown {
+                reason: format!(
+                    "proved with the spec {}, which is not proved itself",
+                    names.join(", ")
+                ),
+            };
+        }
+    }
+}
+
 pub fn report(
     plan: &ClaimPlan,
     claims: &Claims,
@@ -121,6 +155,9 @@ pub fn report(
         Entry::Property(index) => {
             let params = &claims.suite.properties[index].params;
             match refuted(plan, |_| true) {
+                Some((_, refutation)) if precondition(refutation) => {
+                    (Some(open_precondition(refutation, places)), None)
+                }
                 Some((done, refutation)) => (
                     Some(refuted_status(
                         failure(&refutation.check, &refutation.span, places),
@@ -132,7 +169,7 @@ pub fn report(
                 None => (None, None),
             }
         }
-        Entry::Contract(_) => (None, None),
+        Entry::Contract(index) => contract_status(plan, &claims.contracts[index], places),
     };
     let status = status.unwrap_or_else(|| {
         if let Some(reason) = unknown {
@@ -158,6 +195,55 @@ pub fn report(
         status,
     };
     (report, replay)
+}
+
+fn precondition(refutation: &Refutation) -> bool {
+    matches!(refutation.check, Check::Precondition(_))
+}
+
+/// A summary's precondition may fail: the proof needs more than the spec
+/// promises, which is not a failure of the code.
+fn open_precondition(refutation: &Refutation, places: &Places) -> ClaimStatus {
+    let with: Vec<String> = refutation
+        .shown
+        .iter()
+        .map(|(name, value)| format!("{name} = {value}"))
+        .collect();
+    ClaimStatus::Unknown {
+        reason: format!(
+            "{}, for example with {}",
+            failure(&refutation.check, &refutation.span, places),
+            with.join(", ")
+        ),
+    }
+}
+
+fn contract_status(
+    plan: &ClaimPlan,
+    contract: &femp_spec::Contract,
+    places: &Places,
+) -> (Option<ClaimStatus>, Option<ReplayCase>) {
+    if let Some((done, refutation)) = refuted(plan, |_| true) {
+        if precondition(refutation) {
+            return (Some(open_precondition(refutation, places)), None);
+        }
+        let status = refuted_status(
+            failure(&refutation.check, &refutation.span, places),
+            args_counterexample(refutation),
+            done.targets.clone(),
+        );
+        return (Some(status), None);
+    }
+    let unsupported = done(plan).any(|done| matches!(done.verdict, Verdict::NotSupported(_)));
+    if contract.mode == femp_spec::ContractMode::Trusted && !unsupported {
+        return (
+            Some(ClaimStatus::Skipped {
+                reason: format!("trusted: stands for `{}` without proof", contract.target),
+            }),
+            None,
+        );
+    }
+    (None, None)
 }
 
 fn refuted_status(failure: String, counterexample: Counterexample, on: Vec<String>) -> ClaimStatus {
@@ -233,6 +319,11 @@ fn machine_status(
             refuted(plan, |role| role == Role::Search)
                 .map(|(done, refutation)| (done, refutation, done.index + 1))
         });
+    if let Some((_, refutation, _)) = found
+        && precondition(refutation)
+    {
+        return (Some(open_precondition(refutation, places)), None);
+    }
     if let Some((done, refutation, steps)) = found
         && let Some(sequence) = machine::decode(machine, steps, &refutation.values)
     {
@@ -298,6 +389,8 @@ pub fn failure(check: &Check, span: &Span, places: &Places) -> String {
     match check {
         Check::Claim(text) => text.clone(),
         Check::Panic(kind) => format!("panics ({kind}){at}"),
+        Check::Ensures => format!("an `ensures` does not hold{at}"),
+        Check::Precondition(spec) => format!("the precondition of `{spec}` may not hold{at}"),
         Check::Unwind => format!("a loop runs longer than it was unrolled{at}"),
     }
 }

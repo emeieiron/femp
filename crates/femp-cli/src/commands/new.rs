@@ -14,6 +14,11 @@ macro_rules! template {
     };
 }
 
+/// The specification library every project carries a copy of, so that
+/// `#[spec]` functions compile on every platform without a network.
+pub const SPEC_MANIFEST: &str = include_str!("../../../../ingots/spec/fe.toml");
+pub const SPEC_LIBRARY: &str = include_str!("../../../../ingots/spec/src/lib.fe");
+
 const FILES: &[(&str, &str)] = &[
     ("femp.toml", template!("femp.toml")),
     (".gitignore", template!("gitignore")),
@@ -26,6 +31,8 @@ const FILES: &[(&str, &str)] = &[
     ("native/src/lib.fe", template!("native/src/lib.fe")),
     ("wasm/fe.toml", template!("wasm/fe.toml")),
     ("wasm/src/lib.fe", template!("wasm/src/lib.fe")),
+    ("spec/fe.toml", SPEC_MANIFEST),
+    ("spec/src/lib.fe", SPEC_LIBRARY),
 ];
 
 pub fn run(args: &NewArgs) -> Result<bool> {
@@ -44,7 +51,10 @@ pub fn run(args: &NewArgs) -> Result<bool> {
         write_file(&root.join(path), render(template, &args.name))?;
     }
     console::step("Created", &format!("project `{}`", args.name));
-    console::detail(&format!("cd {}\nfemp test\nfemp build", args.name));
+    console::detail(&format!(
+        "cd {}\nfemp test\nfemp prove\nfemp build",
+        args.name
+    ));
     Ok(true)
 }
 
@@ -69,6 +79,15 @@ mod tests {
             let rendered = render(template, "my-app");
             assert!(!rendered.contains("{{"), "unfilled placeholder in {path}");
         }
+    }
+
+    #[test]
+    fn the_demonstrator_carries_the_current_spec_library() {
+        let vendored = include_str!("../../../../examples/vesting/spec/src/lib.fe");
+        assert_eq!(
+            vendored, SPEC_LIBRARY,
+            "copy ingots/spec into examples/vesting/spec"
+        );
     }
 
     #[test]

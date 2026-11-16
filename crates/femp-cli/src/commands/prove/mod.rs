@@ -107,13 +107,16 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
     let places = aggregate::Places::new(project);
     let mut claims = Vec::new();
     let mut cases = Vec::new();
+    let mut relies_on = Vec::new();
     for ((_, module_claims), module_plans) in found.iter().zip(&plans) {
         for plan in module_plans {
             let (report, case) = aggregate::report(plan, module_claims, &places);
             claims.push(report);
             cases.push(case);
+            relies_on.push(plan.relies_on());
         }
     }
+    aggregate::require_specs(&mut claims, &relies_on);
     let flat: Vec<&plan::ClaimPlan> = plans.iter().flatten().collect();
     if !args.no_replay {
         let replayer = replay::Replayer {
@@ -127,12 +130,14 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
                 .iter_mut()
                 .zip(&flat)
                 .zip(&cases)
-                .filter(|((_, plan), _)| plan.module == module.name)
-                .filter_map(|((report, plan), case)| {
+                .zip(&relies_on)
+                .filter(|(((_, plan), _), _)| plan.module == module.name)
+                .filter_map(|(((report, plan), case), relied)| {
                     Some(replay::Found {
                         plan,
                         report,
                         case: case.clone()?,
+                        relied: !relied.is_empty(),
                     })
                 })
                 .collect();

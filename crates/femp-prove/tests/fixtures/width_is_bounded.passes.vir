@@ -18,6 +18,26 @@ bb0:
   v3: () = ()  @src/lib.fe:19
   return v3  @src/lib.fe:19
 
+// after spec_shape
+prove width_is_bounded() -> ()  @src/lib.fe:19
+bb0:
+  v0 low: u8 = havoc  @src/lib.fe:19
+  v1 high: u8 = havoc  @src/lib.fe:19
+  v2: bool = call f1(v0, v1)  @src/lib.fe:19
+  assert v2 [returns false]  @src/lib.fe:19
+  v3: () = ()  @src/lib.fe:19
+  return v3  @src/lib.fe:19
+
+// after summaries
+prove width_is_bounded() -> ()  @src/lib.fe:19
+bb0:
+  v0 low: u8 = havoc  @src/lib.fe:19
+  v1 high: u8 = havoc  @src/lib.fe:19
+  v2: bool = call f1(v0, v1)  @src/lib.fe:19
+  assert v2 [returns false]  @src/lib.fe:19
+  v3: () = ()  @src/lib.fe:19
+  return v3  @src/lib.fe:19
+
 // after inline
 prove width_is_bounded() -> ()  @src/lib.fe:19
   slot s0: Range

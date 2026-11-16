@@ -13,6 +13,6 @@ pub mod task;
 pub mod vc;
 pub mod verdict;
 
-pub use engine::{Config, Dumps, prove, prove_first};
-pub use task::{Input, NotSupported, Task};
+pub use engine::{Config, Dumps, Proof, prove, prove_first};
+pub use task::{Input, NotSupported, Summary, Task};
 pub use verdict::{Refutation, Verdict};

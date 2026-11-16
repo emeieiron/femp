@@ -1,0 +1,54 @@
+use femp_spec::{ensures, implies, requires}
+use ingot::error::VestingError
+use ingot::position::Position
+use ingot::schedule::Schedule
+
+// What the vesting functions promise, for every input. `femp prove` proves
+// each spec and then uses it in place of its target's body wherever the
+// target is called, unless the spec is `transparent`.
+
+/// Nothing vests before the cliff, everything vests at the end, and the
+/// amount never exceeds the total. Callers keep the body, since they also
+/// rely on vesting growing over time, which this spec does not state.
+#[spec(transparent, target = "Schedule::vested_at")]
+fn vested_at_spec(schedule: Schedule, now: u64) -> u64 {
+    requires(schedule.cliff <= schedule.duration)
+    requires(schedule.start <= u64::max() - schedule.duration)
+    let vested = schedule.vested_at(now)
+    ensures(vested <= schedule.total)
+    ensures(
+        implies(now < schedule.start + schedule.cliff, vested == 0),
+    )
+    ensures(
+        implies(
+            now >= schedule.start + schedule.duration,
+            vested == schedule.total,
+        ),
+    )
+    vested
+}
+
+/// A successful claim adds exactly the amount claimed, keeps the schedule,
+/// and never passes what has vested.
+#[spec]
+fn claim_spec(position: Position, amount: u64, now: u64) -> Result<VestingError, Position> {
+    requires(position.claimed <= position.schedule.total)
+    requires(position.schedule.cliff <= position.schedule.duration)
+    requires(
+        position.schedule.start <= u64::max() - position.schedule.duration,
+    )
+    let result = position.claim(amount, now)
+    match result {
+        Result::Ok(updated) => {
+            ensures(updated.claimed == position.claimed + amount)
+            ensures(updated.claimed <= position.schedule.vested_at(now))
+            ensures(same_schedule(updated.schedule, position.schedule))
+        },
+        Result::Err(_) => ensures(true),
+    }
+    result
+}
+
+fn same_schedule(_ a: Schedule, _ b: Schedule) -> bool {
+    a.total == b.total && a.start == b.start && a.cliff == b.cliff && a.duration == b.duration
+}

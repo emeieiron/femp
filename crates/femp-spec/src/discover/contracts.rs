@@ -231,11 +231,25 @@ impl Builder {
             },
         };
         let segments: Vec<&str> = wanted.split("::").map(str::trim).collect();
-        let matches: Vec<&Candidate> = self
+        let mut matches: Vec<&Candidate> = self
             .candidates
             .iter()
             .filter(|candidate| candidate.segments().ends_with(&segments))
             .collect();
+        // A spec of a method takes the receiver first, which tells methods
+        // of the same name apart.
+        if matches.len() > 1
+            && let Some(first) = function.params.first()
+        {
+            let receivers: Vec<&Candidate> = matches
+                .iter()
+                .copied()
+                .filter(|candidate| candidate.owner.as_deref() == Some(first.ty.as_str()))
+                .collect();
+            if receivers.len() == 1 {
+                matches = receivers;
+            }
+        }
         match matches.as_slice() {
             [found] => Some(TargetRef {
                 path: found.path.clone(),
@@ -257,13 +271,7 @@ impl Builder {
             several => {
                 let places: Vec<String> = several
                     .iter()
-                    .map(|candidate| {
-                        format!(
-                            "`{}` at {}",
-                            candidate.segments().join("::"),
-                            candidate.location
-                        )
-                    })
+                    .map(|candidate| format!("`{}`", candidate.segments().join("::")))
                     .collect();
                 self.error(
                     file,

@@ -120,7 +120,7 @@ fn proves_and_refutes_the_fixture() {
     };
     for target in ["evm", "native", "wasm"] {
         for (declared, task) in tasks(target) {
-            let verdict = femp_prove::prove(task, &config, &Dumps::default());
+            let verdict = femp_prove::prove(task, &config, &Dumps::default()).verdict;
             let name = declared.name.as_str();
             match (name, &verdict) {
                 ("width_is_bounded" | "total_is_small", Verdict::Proved) => {}

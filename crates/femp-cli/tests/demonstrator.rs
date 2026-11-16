@@ -263,11 +263,12 @@ support = { path = "vendor/support" }
     .unwrap();
     let ingot = root.join("shared/fe.toml");
     let shared_manifest = fs::read_to_string(&ingot).unwrap();
-    fs::write(
-        ingot,
-        format!("{shared_manifest}\n[dependencies]\nsupport = true\n"),
-    )
-    .unwrap();
+    let with_support = if shared_manifest.contains("[dependencies]") {
+        shared_manifest.replace("[dependencies]\n", "[dependencies]\nsupport = true\n")
+    } else {
+        format!("{shared_manifest}\n[dependencies]\nsupport = true\n")
+    };
+    fs::write(ingot, with_support).unwrap();
     let authored = root.join("shared/src/fixture.fe");
     fs::write(
         &authored,

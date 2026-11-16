@@ -1,7 +1,9 @@
 //! Compile-time constants as instructions: scalars directly, aggregates
 //! built from their parts.
 
-use fe_hir::analysis::semantic::{SConst, SemConstId, SemConstScalar, SemConstValue};
+use fe_hir::analysis::semantic::{
+    EvalOutcome, SConst, SemConstId, SemConstScalar, SemConstValue, eval_const_ref,
+};
 use femp_core::property::{Ty, Value};
 use femp_vir::{Const, Expr, Span, Type, ValueId};
 
@@ -16,6 +18,12 @@ impl<'db> BodyLowering<'_, 'db> {
     ) -> Lowering<ValueId> {
         match constant {
             SConst::Value(value) => self.const_value(value.value(), ty, span),
+            // The checked body keeps references to `const` items whose
+            // values have a runtime form; evaluate them here.
+            SConst::Ref(reference) => match eval_const_ref(self.lx.db, *reference) {
+                EvalOutcome::Ready(value) => self.const_value(value, ty, span),
+                _ => Err(self.unsupported(span, "a constant the compiler could not evaluate")),
+            },
             _ => Err(self.unsupported(span, "a constant the compiler did not evaluate")),
         }
     }

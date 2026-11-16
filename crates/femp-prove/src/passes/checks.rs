@@ -41,24 +41,29 @@ impl Pass for Checks {
                 cursor.assert(never, Check::Panic(kind));
                 cursor.terminate(Terminator::Stop);
             }
-            if function.block(block).assumed {
-                assume_panics_away(function, block);
+            let mode = function.block(block).mode;
+            if mode != femp_vir::Mode::Checked {
+                assume_away(function, block, mode);
             }
         }
         Ok(())
     }
 }
 
-/// In a block whose panics are assumed not to happen, each panic check
-/// becomes an assumption.
-fn assume_panics_away(function: &mut Function, block: femp_vir::BlockId) {
+/// Turns the checks a block's mode assumes into assumptions: panics in a
+/// trusted block, panics and preconditions in an assumed one.
+fn assume_away(function: &mut Function, block: femp_vir::BlockId, mode: femp_vir::Mode) {
     for stmt in &mut function.block_mut(block).stmts {
-        if let StmtKind::Assert {
-            cond,
-            check: Check::Panic(_),
-        } = stmt.kind
-        {
-            stmt.kind = StmtKind::Assume(cond);
+        let StmtKind::Assert { cond, check } = &stmt.kind else {
+            continue;
+        };
+        let assumed = match check {
+            Check::Panic(_) => true,
+            Check::Precondition(_) => mode == femp_vir::Mode::Assumed,
+            _ => false,
+        };
+        if assumed {
+            stmt.kind = StmtKind::Assume(*cond);
         }
     }
 }
