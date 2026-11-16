@@ -10,7 +10,7 @@ use crate::report::{
     TargetOutcome,
 };
 use crate::shrink::Shrinker;
-use crate::verdict::{Failure, judge_property};
+use crate::verdict::{Failure, judge_property, rejected};
 
 struct Case {
     args: Vec<Value>,
@@ -31,6 +31,7 @@ pub fn run(
     let kind = match property.kind {
         PropertyKind::Holds => EntryKind::Property,
         PropertyKind::Agrees => EntryKind::Differential,
+        PropertyKind::Spec => EntryKind::Spec,
     };
     let mut entry = report(suite, &property.name, kind, property.location.to_string());
     let generator = match ArgsGen::for_property(engine.registry, property) {
@@ -129,6 +130,10 @@ pub fn run(
         };
         for (case, outcomes) in cases.drain(..).zip(outcomes) {
             entry.cases += 1;
+            if rejected(property.kind, &outcomes) {
+                entry.rejected += 1;
+                continue;
+            }
             if let Some(failure) = judge_property(property.kind, &outcomes, engine.comparator) {
                 failing = Some((case, failure));
                 break 'batches;
@@ -137,6 +142,12 @@ pub fn run(
     }
 
     let Some((case, failure)) = failing else {
+        if entry.cases > 0 && entry.rejected == entry.cases {
+            entry.notes.push(
+                "`requires` rejected every case; its generators never reach the spec's domain"
+                    .to_string(),
+            );
+        }
         return entry;
     };
     let case_index = case.index;

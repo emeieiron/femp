@@ -51,6 +51,7 @@ impl Replayer<'_> {
             return Ok(());
         }
         let cx = self.inputs.context(Default::default());
+        let suite = claims.testable();
         let project = cx.project;
         let mut store = Store::open(&project.root);
         let mut executors: Vec<(String, Box<dyn Executor>)> = Vec::new();
@@ -73,7 +74,7 @@ impl Replayer<'_> {
                     &cx,
                     &HarnessRequest {
                         subject: module,
-                        suite: &claims.suite,
+                        suite: &suite,
                         out_dir: &out_dir,
                         timeout: self.timeout,
                     },
@@ -88,20 +89,36 @@ impl Replayer<'_> {
             executors.push((label, executor));
         }
         for item in found {
-            self.replay_one(&claims.suite, &mut executors, &mut store, item)?;
+            self.replay_one(claims, &suite, &mut executors, &mut store, item)?;
         }
         Ok(())
     }
 
     fn replay_one(
         &self,
+        claims: &Claims,
         suite: &Suite,
         executors: &mut [(String, Box<dyn Executor>)],
         store: &mut Store,
         found: Found<'_>,
     ) -> Result<()> {
+        // Runnable specs follow the suite's own properties.
+        let property_index = match found.plan.entry {
+            Entry::Property(index) => Some(index),
+            Entry::Contract(index) => claims.contracts[index].runnable().map(|_| {
+                claims.suite.properties.len()
+                    + claims.contracts[..index]
+                        .iter()
+                        .filter(|contract| contract.runnable().is_some())
+                        .count()
+            }),
+            Entry::Machine(_) => None,
+        };
         let (entry_name, judged, outcomes) = match (found.plan.entry, &found.case) {
-            (Entry::Property(index), ReplayCase::Args(values)) => {
+            (Entry::Property(_) | Entry::Contract(_), ReplayCase::Args(values))
+                if property_index.is_some() =>
+            {
+                let index = property_index.unwrap_or_default();
                 let property = &suite.properties[index];
                 let mut outcomes: Vec<(String, Outcome)> = Vec::new();
                 for (label, executor) in executors.iter_mut() {

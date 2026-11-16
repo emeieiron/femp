@@ -36,6 +36,9 @@ fn render_entry(out: &mut String, report: &RunReport, entry: &EntryReport, width
     match &entry.status {
         Status::Passed => {
             let mut what = unit(entry, entry.cases);
+            if entry.rejected > 0 {
+                let _ = write!(what, " ({} rejected)", entry.rejected);
+            }
             if entry.exhaustive {
                 what.push_str(", exhaustive");
             }

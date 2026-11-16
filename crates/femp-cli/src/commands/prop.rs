@@ -40,7 +40,7 @@ pub fn run(args: &PropArgs) -> Result<bool> {
     let found: Vec<(&Module, Claims)> =
         claims::discover_all(project, &platforms, args.filter.as_deref())?
             .into_iter()
-            .filter(|(_, claims)| !claims.suite.is_empty())
+            .filter(|(_, claims)| !claims.testable().is_empty())
             .collect();
     if found.is_empty() {
         console::warning("no `#[property]`, `#[differential]` or `#[machine]` entry points found");
@@ -52,7 +52,7 @@ pub fn run(args: &PropArgs) -> Result<bool> {
     }
     let suites: Vec<(&Module, Suite)> = found
         .into_iter()
-        .map(|(module, claims)| (module, claims.suite))
+        .map(|(module, claims)| (module, claims.testable()))
         .collect();
 
     let seed = match &args.seed {

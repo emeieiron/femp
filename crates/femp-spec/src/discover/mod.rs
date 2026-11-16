@@ -250,6 +250,7 @@ impl Builder {
         let marker = match kind {
             PropertyKind::Holds => "property",
             PropertyKind::Agrees => "differential",
+            PropertyKind::Spec => "spec",
         };
         let options = self.options(file, &function.attrs, marker, &["cases"]);
         let cases = self.number(file, function.line, &options, "cases");
@@ -264,12 +265,12 @@ impl Builder {
         let params = self.params(file, function)?;
         let result = match (kind, function.result.as_deref().map(Ty::parse)) {
             (PropertyKind::Holds, Some(Some(Ty::Bool))) => Ty::Bool,
-            (PropertyKind::Agrees, Some(Some(ty))) => ty,
+            (PropertyKind::Agrees | PropertyKind::Spec, Some(Some(ty))) => ty,
             (PropertyKind::Holds, _) => {
                 self.error(file, function.line, "a `#[property]` must return `bool`");
                 return None;
             }
-            (PropertyKind::Agrees, _) => {
+            (PropertyKind::Agrees | PropertyKind::Spec, _) => {
                 self.error(
                     file,
                     function.line,

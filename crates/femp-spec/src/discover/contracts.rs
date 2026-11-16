@@ -153,6 +153,8 @@ impl Builder {
             transparent,
             timeout,
             params,
+            result: function.result.as_deref().and_then(Ty::parse),
+            public: function.public,
             location: Location {
                 file: file.to_path_buf(),
                 line,

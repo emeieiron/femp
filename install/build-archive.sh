@@ -4,7 +4,8 @@
 #
 #   femp-<target>/bin/femp
 #   femp-<target>/toolchains/fe-<version>/bin/fe
-#   femp-<target>/LICENSE, LICENSE-fe
+#   femp-<target>/z3/bin/z3
+#   femp-<target>/LICENSE, LICENSE-fe, LICENSE-z3
 #
 #   install/build-archive.sh <target> [out-dir]
 #
@@ -12,7 +13,12 @@
 # drives, which needs Rust 1.97 or newer and npm. To package a compiler that
 # is already built instead, set FEMP_ARCHIVE_FE to it and FEMP_ARCHIVE_FE_LICENSE
 # to its license file. FEMP_ARCHIVE_RUST names a rustup toolchain to build with.
+#
+# The Z3 solver `femp prove` drives is a pinned release build, checked
+# against the SHA-256 below before it is packaged.
 set -eu
+
+z3_version="5.4.1"
 
 [ $# -ge 1 ] || {
     echo "usage: $0 <target> [out-dir]" >&2
@@ -57,6 +63,44 @@ else
     cp "$stage/fe/LICENSE-APACHE" "$package/LICENSE-fe"
 fi
 cp "$root/LICENSE" "$package/LICENSE"
+
+case "$target" in
+    x86_64-unknown-linux-gnu)
+        z3_build="x64-glibc-2.39"
+        z3_sha256="b548bac48ef2452b4e09ea2945cf4b011d5f43fcf39e4799df268ee7e0769d85"
+        ;;
+    aarch64-unknown-linux-gnu)
+        z3_build="arm64-glibc-2.38"
+        z3_sha256="9e8f781f15a423ede5bd491b665966dbb607d9f9c4f9f9b502116f271d1b050f"
+        ;;
+    aarch64-apple-darwin)
+        z3_build="arm64-osx-13.3"
+        z3_sha256="a4a878121e81dfc297d027dd0b51dc4f08feb4296d6ecace42bfbc87a29d6d58"
+        ;;
+    x86_64-apple-darwin)
+        z3_build="x64-osx-13.3"
+        z3_sha256="79e93b0564b82bf2c1b355df130bab543b1ff88d597c985632770fea05f1b249"
+        ;;
+    *)
+        echo "no Z3 build is pinned for $target" >&2
+        exit 1
+        ;;
+esac
+z3_name="z3-$z3_version-$z3_build"
+curl -fsSL -o "$stage/$z3_name.zip" \
+    "https://github.com/Z3Prover/z3/releases/download/z3-$z3_version/$z3_name.zip"
+z3_actual=$( (sha256sum "$stage/$z3_name.zip" 2>/dev/null || shasum -a 256 "$stage/$z3_name.zip") | cut -d' ' -f1)
+[ "$z3_actual" = "$z3_sha256" ] || {
+    echo "$z3_name.zip has SHA-256 $z3_actual, expected $z3_sha256" >&2
+    exit 1
+}
+unzip -q "$stage/$z3_name.zip" -d "$stage"
+mkdir -p "$package/z3/bin"
+cp "$stage/$z3_name/bin/z3" "$package/z3/bin/z3"
+for library in "$stage/$z3_name"/bin/libz3.*; do
+    [ -e "$library" ] && cp "$library" "$package/z3/bin/"
+done
+cp "$stage/$z3_name/LICENSE.txt" "$package/LICENSE-z3"
 
 mkdir -p "$out"
 tar -czf "$out/$name.tar.gz" -C "$stage" "$name"

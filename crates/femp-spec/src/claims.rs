@@ -1,6 +1,6 @@
 use std::fmt;
 
-use femp_core::property::{Location, Suite, Ty};
+use femp_core::property::{Location, Param, Property, PropertyKind, Suite, Ty};
 
 /// Everything one module claims: the entry points property testing runs and
 /// proving checks, and the `#[spec]` functions that describe other functions.
@@ -13,6 +13,16 @@ pub struct Claims {
 impl Claims {
     pub fn is_empty(&self) -> bool {
         self.suite.is_empty() && self.contracts.is_empty()
+    }
+
+    /// The entry points property testing runs: the suite, and the specs it
+    /// can run as properties after the suite's own.
+    pub fn testable(&self) -> Suite {
+        let mut suite = self.suite.clone();
+        suite
+            .properties
+            .extend(self.contracts.iter().filter_map(Contract::runnable));
+        suite
     }
 
     /// Keeps the claims whose name contains `pattern`.
@@ -50,7 +60,41 @@ pub struct Contract {
     /// Seconds the solver may spend on each of the spec's obligations.
     pub timeout: Option<u32>,
     pub params: Vec<SpecParam>,
+    /// The result type, when it is a primitive.
+    pub result: Option<Ty>,
+    pub public: bool,
     pub location: Location,
+}
+
+impl Contract {
+    /// The spec as an entry point property testing can run: a public
+    /// function of primitives to a primitive.
+    pub fn runnable(&self) -> Option<Property> {
+        if !self.public {
+            return None;
+        }
+        let params = self
+            .params
+            .iter()
+            .map(|param| {
+                Some(Param {
+                    name: param.name.clone(),
+                    label: param.label.clone(),
+                    ty: param.ty?,
+                    generator: param.generator.clone(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Property {
+            name: self.name.clone(),
+            kind: PropertyKind::Spec,
+            path: self.path.clone(),
+            params,
+            result: self.result?,
+            cases: None,
+            location: self.location.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

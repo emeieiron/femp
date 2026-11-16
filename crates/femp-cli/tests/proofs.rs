@@ -239,3 +239,56 @@ fn new_projects_prove_their_spec() {
         "{report}"
     );
 }
+
+#[test]
+fn public_specs_are_tested_and_refuted_alike() {
+    let Some(project) = project(PLANTED) else {
+        return;
+    };
+    with_specs(
+        project.path(),
+        r#"use femp_spec::{ensures, requires}
+use ingot::doubled
+
+/// Fails from 500 on, for even inputs only.
+#[spec]
+#[gen(x = "0..=1000")]
+pub fn doubled_spec(x: u64) -> u64 {
+    requires(x % 2 == 0)
+    let result = doubled(x)
+    ensures(result < 1000)
+    result
+}
+"#,
+    );
+    let listed = stdout(&femp(project.path(), &["prop", "--list", "-f", "doubled"]));
+    assert!(
+        listed.contains("core::doubled_spec  spec  shared/src/specs.fe:"),
+        "{listed}"
+    );
+
+    let output = femp(project.path(), &["prove", "-f", "doubled"]);
+    let report = stdout(&output);
+    let spec = entry(&report, "core::doubled_spec");
+    assert!(spec.starts_with("REFUTED"), "{spec}");
+    assert!(
+        spec.contains("an `ensures` does not hold at shared/src/specs.fe:"),
+        "{spec}"
+    );
+    assert!(spec.contains("            x = 500\n"), "{spec}");
+    assert!(
+        spec.contains("evm panicked (assertion failed) · native panicked (assertion failed)"),
+        "{spec}"
+    );
+    assert!(spec.contains("not replayed on wasm"), "{spec}");
+    assert!(
+        spec.contains("saved to regressions/core/doubled_spec.json"),
+        "{spec}"
+    );
+
+    let tested = femp(project.path(), &["prop", "--seed", "4", "-f", "doubled"]);
+    let report = stdout(&tested);
+    assert!(report.contains("fails on a stored regression"), "{report}");
+    assert!(report.contains("      x = 500\n"), "{report}");
+    assert!(report.contains("not run on wasm"), "{report}");
+}

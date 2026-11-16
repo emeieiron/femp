@@ -121,6 +121,14 @@ How a contract machine runs on the EVM:
 - A command whose transaction reverts with a custom error is recorded as rejected: its effects
   are rolled back and the run continues. A panic or a halt fails the run.
 
+### Specs
+
+A public `#[spec]` function whose parameters and result are primitives runs as an entry point
+too. A case its `requires` rejects is discarded and counted (`256 cases (31 rejected)`); a
+failed `ensures` or any other panic fails it. A WebAssembly module traps alike when a spec
+rejects a case and when it fails, so specs run on the EVM and natively, and show as not run on
+`wasm`. See [proving](proving.md) for what specs state and how `femp prove` uses them.
+
 ### Rules
 
 | | |

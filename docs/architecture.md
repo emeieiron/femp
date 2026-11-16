@@ -7,24 +7,27 @@ itself is always done by `fe`.
 ## Crates
 
 ```
-femp-cli ──────┬──────────────┬──────────────┬─────────────┐
-   │           │              │              │             │
-femp-testing  femp-prop   femp-evm      femp-native     femp-wasm
-   │           │              │              ├─────────────┤
-   │           │              │         femp-harness       │
-   │           │              └──────┬───────┴─────────────┘
-   │           │              femp-toolchain
-   │           │                     │
-   └───────────┴─────────────── femp-core
+femp-cli ──┬────────────┬────────────┬────────────┬──────────────┬─────────────┐
+   │       │            │            │            │              │             │
+femp-testing  femp-prop  femp-prove  femp-frontend  femp-evm   femp-native  femp-wasm
+   │       │      │      │      │      │             │              ├─────────────┤
+   │       │      └──┬───┘      femp-vir             │         femp-harness       │
+   │       │     femp-spec          │                └──────┬───────┴─────────────┘
+   │       │         │              │                femp-toolchain
+   └───────┴─────────┴──────────────┴───────────────────────┴─── femp-core
 ```
 
 | Crate | Responsibility | Depends on |
 | --- | --- | --- |
 | `femp-core` | `femp.toml` and `fe.toml` parsing, the module graph, layering rules, the `Platform` trait and registry, artifact and test-outcome types, a small source writer for generated code. No process spawning. | – |
-| `femp-toolchain` | Finding the pinned compiler, building it from source, probing its backends and the host, running `fe check/build/test`, parsing test output. The only crate that knows the compiler's command line. | core |
+| `femp-toolchain` | Finding the pinned compiler, building it from source, probing its backends and the host (Node.js, a C compiler, Z3), running `fe check/build/test`, parsing test output. The only crate that knows the compiler's command line. | core |
 | `femp-evm`, `femp-native`, `femp-wasm` | One `Platform` implementation each: availability, build, bindings, packaging. | core, toolchain |
 | `femp-testing` | Planning which module runs on which platform, running the jobs, and the parity matrix. | core |
-| `femp-prop` | Property testing: discovering entry points in Fe sources, generators and choice tapes, the engine, shrinking, comparison, regressions and reports. No process spawning, no platform knowledge. | core |
+| `femp-spec` | The claims both checking tools read: discovering `#[property]`, `#[differential]`, `#[machine]` and `#[spec]` declarations in Fe sources, resolving `#[gen]` texts into domains, and the counterexample format. | core |
+| `femp-prop` | Property testing: generators and choice tapes, the engine, shrinking, comparison, regressions and reports. No process spawning, no platform knowledge. | core, spec |
+| `femp-vir` | The verification IR: types, SSA functions with block parameters, a builder and a stable text form. No compiler types. | core |
+| `femp-frontend` | Loads an ingot with the Fe compiler's own crates (a Git dependency pinned to the release tag) and lowers the functions claims name into VIR. The only crate that links the compiler. | core, vir |
+| `femp-prove` | Proving: tasks per claim, the passes, verification conditions, the Z3 process, minimization, verdicts and reports. No compiler types, no platform knowledge. | core, spec, vir |
 | `femp-harness` | Child processes that answer a line protocol, for harnesses that run as processes (native, and WebAssembly through Node.js). | core |
 | `femp-cli` | Argument parsing, the session (project + registry + environment), commands, console output, project templates. `registry.rs` is the only file that names concrete platforms. | all |
 
@@ -108,7 +111,7 @@ module's memory for the duration of a call, and converts values by their Fe type
 
 `femp prop` is described for users in [property-testing.md](property-testing.md). Internally:
 
-1. **Discovery** (`femp-prop/src/discover`) tokenizes each module's sources and reads the
+1. **Discovery** (`femp-spec/src/discover`) tokenizes each module's sources and reads the
    attributes and signatures of entry points. It does not resolve names. The harness calls each
    entry point by its path, so the compiler checks anything discovery reads wrongly.
 2. **Generation** (`cases`, `generators`, `choices`): every case is a function of a tape of
@@ -126,12 +129,45 @@ run is a sequence executed from a fresh state that returns one record per step: 
 through transactions against storage, in one native process reading standard input, and in
 one WebAssembly call that reads the sequence from a host file.
 
+## Proving
+
+`femp prove` is described for users in [proving.md](proving.md). One run:
+
+1. **Claims** come from the same discovery as property testing (`femp-spec`).
+2. **Lowering** (`femp-frontend`) loads each module once per platform with the platform's Fe
+   target, finds each claim's functions, and lowers every function they reach from the
+   compiler's normalized semantic IR: SSA, monomorphized, typed, with source positions. Views
+   and shared borrows become the values they read. `extern` functions of the core library have
+   models (`intrinsics.rs`); calls into `femp_spec` become specification statements.
+3. **Tasks** (`femp-prove/src/obligation`): each claim becomes one or more procedures of
+   `assume` and `assert` around calls: a property's call and result; a machine's initializer, one
+   induction step per command, and the bounded search; a spec's arbitrary arguments; two
+   targets' programs side by side for a differential. Targets whose tasks print the same,
+   ignoring source positions, share one task.
+4. **Passes** (`passes`, in order): `scope` keeps what the task reaches · `recursion` rejects
+   cycles · `spec_shape` gives a spec under proof its meaning · `summaries` replaces calls to
+   specified functions with their specs · `inline` · `slots` turns local storage into SSA ·
+   `checks` makes every panic an assertion tagged with its `PanicKind` · `loops` cuts loops at
+   their invariants or unrolls them · `simplify`. Blocks carry a mode, so that what an assumed
+   invariant or a proved spec rules out is assumed rather than checked again.
+5. **Verification conditions** (`vc`): block reachability over the acyclic procedure. Integers
+   are SMT integers with range facts, wrapping by `mod`, truncating division, bitwise operations
+   through bit vectors; structs, enums and tuples are datatypes; arrays are SMT arrays; a
+   result a spec leaves open is an uninterpreted function of the arguments.
+6. **Solver** (`solver`): one `z3 -in -smt2` process per task, a fresh context per assertion
+   (a context reused across queries is weaker on nonlinear arithmetic), a fixed seed and a
+   per-query timeout. A satisfiable query's inputs are minimized by bisection on their distance
+   from the simplest value, in property testing's order.
+7. **Replay and report** (`femp-cli`): counterexamples run on the property harnesses, are judged
+   as `femp prop` judges them, and are saved as regressions. The report renders as text or JSON.
+
 ## Toolchain
 
 `femp-toolchain` resolves the compiler in this order: `FEMP_FE`, the managed toolchain for the
 pinned version under `FEMP_HOME` (default `~/.femp`), then `fe` on `PATH`. The version must equal
 the project's pin. Backends are read from the compiler's own help text, which lists exactly the
-ones compiled in.
+ones compiled in. Z3 is found the same way Node.js is: `FEMP_Z3`, then the copy under
+`FEMP_HOME/z3`, then `z3` on `PATH`, skipping any that does not run.
 
 `femp toolchain install` clones the release tag, installs the parser generator pinned by the
 compiler's grammar crate (unless a `tree-sitter` CLI is already on `PATH`), and runs
@@ -149,6 +185,11 @@ that is new enough.
 - `crates/femp-cli/tests` drives the `femp` binary against the demonstrator when the compiler is
   installed.
 - `examples/vesting/e2e` runs one table of cases against the three built artifacts.
+- `femp-frontend` snapshots the VIR of a fixture ingot for each target
+  (`tests/fixtures/basics.*.vir`), and `femp-prove` snapshots tasks after every pass and an
+  SMT-LIB script, then proves and refutes its fixture's claims with Z3.
+  `crates/femp-cli/tests/proofs.rs` runs `femp prove` on the planted fixture and the
+  demonstrator and checks verdicts, counterexamples, replays and regressions.
 - `femp-prop` tests the engine against in-memory executors. Each harness renderer is tested
   against a committed fixture, and the revm executor runs committed harness bytecode.
   `crates/femp-cli/tests/properties.rs` runs `femp prop` on a fixture whose properties fail on

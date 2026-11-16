@@ -135,6 +135,7 @@ pub fn skeletons(module: &Module, claims: &Claims) -> Vec<ClaimPlan> {
         let kind = match property.kind {
             PropertyKind::Holds => ClaimKind::Property,
             PropertyKind::Agrees => ClaimKind::Differential,
+            PropertyKind::Spec => ClaimKind::Spec,
         };
         plans.push(skeleton(
             module,
@@ -318,6 +319,8 @@ pub fn add_target(
                         let built = property::task(program, func, declared);
                         add_built(plan, Role::Main, built, &context);
                     }
+                    // Specs are proved as contracts, not as entry points.
+                    PropertyKind::Spec => {}
                     PropertyKind::Agrees => match differential::side(program, func) {
                         Ok(side) => add_side(plan, side, label),
                         Err(error) => record(plan, Role::Main, label, Verdict::NotSupported(error)),

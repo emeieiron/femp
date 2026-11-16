@@ -3,7 +3,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use femp_core::Result;
-use femp_core::property::{Executor, Outcome, Sequence, Suite, Support, Trace, Value};
+use femp_core::property::{
+    Executor, Outcome, PropertyKind, Sequence, Suite, Support, Trace, Value,
+};
 use femp_harness::{Session, wire};
 
 use super::render::{fits, machine_fits, property_fits};
@@ -40,7 +42,14 @@ const TOO_WIDE: &str = "it has a value wider than 64 bits, which a WebAssembly e
 
 impl Executor for WasmExecutor {
     fn supports_property(&self, index: usize) -> Support {
-        if property_fits(&self.suite.properties[index]) {
+        let property = &self.suite.properties[index];
+        if property.kind == PropertyKind::Spec {
+            return Support::No(
+                "a WebAssembly module traps alike when a spec rejects a case and when it fails"
+                    .to_string(),
+            );
+        }
+        if property_fits(property) {
             Support::Yes
         } else {
             Support::No(TOO_WIDE.to_string())

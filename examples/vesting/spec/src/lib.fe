@@ -3,11 +3,10 @@
 //! is assumed of its target's arguments, what it `ensures` is proved of the
 //! result, and an `invariant` holds on every iteration of a loop.
 
-/// Rejects the case unless `condition` holds.
+/// Rejects the case unless `condition` holds. The message tells a rejected
+/// case apart from a failure wherever a target reports one.
 pub fn requires(_ condition: bool) {
-    if !condition {
-        core::panic()
-    }
+    assert!(condition, "femp_spec: requires")
 }
 
 /// Fails unless `condition` holds.
