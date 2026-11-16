@@ -5,6 +5,7 @@ mod harness;
 
 use std::path::Path;
 
+use femp_compiler::{Target, TestOptions};
 use femp_core::Result;
 use femp_core::artifact::{Artifact, copy_flat};
 use femp_core::environment::Environment;
@@ -12,12 +13,10 @@ use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
-use femp_compiler::{Target, TestOptions};
 
 pub use build::{ABI, BYTECODE, METADATA, RUNTIME_BYTECODE};
 
 pub const ID: &str = "evm";
-const BACKEND: &str = "sonatina";
 
 pub struct EvmPlatform {
     id: PlatformId,
@@ -50,15 +49,8 @@ impl Platform for EvmPlatform {
         Stability::Stable
     }
 
-    fn capability(&self, environment: &Environment) -> Capability {
-        if environment.toolchain.supports(BACKEND) {
-            Capability::Available
-        } else {
-            Capability::unavailable(
-                "this build of the Fe compiler has no EVM backend",
-                "run `femp toolchain install`",
-            )
-        }
+    fn capability(&self, _environment: &Environment) -> Capability {
+        Capability::Available
     }
 
     fn binding_kinds(&self) -> &[&'static str] {

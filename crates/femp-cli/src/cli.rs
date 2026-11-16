@@ -16,10 +16,8 @@ pub struct Cli {
 pub enum Command {
     /// Create a new multiplatform project
     New(NewArgs),
-    /// Report what the toolchain and this machine can build
+    /// Report the linked compiler and what this machine can build
     Doctor,
-    /// Manage the Fe compiler used by femp
-    Toolchain(ToolchainArgs),
     /// Materialize project-generated sources for editing and code navigation
     Generate,
     /// Type-check every module for the platforms it must support
@@ -42,20 +40,6 @@ pub enum Command {
 pub struct NewArgs {
     /// Name of the project and of the directory to create
     pub name: String,
-}
-
-#[derive(Args)]
-pub struct ToolchainArgs {
-    #[command(subcommand)]
-    pub command: ToolchainCommand,
-}
-
-#[derive(Subcommand)]
-pub enum ToolchainCommand {
-    /// Build the pinned Fe compiler from source with every backend femp uses
-    Install,
-    /// Print the path of the Fe compiler femp would run
-    Path,
 }
 
 #[derive(Args)]

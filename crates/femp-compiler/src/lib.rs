@@ -19,6 +19,7 @@ mod spans;
 mod spec_ops;
 mod target;
 mod test;
+mod toolchain;
 mod types;
 mod wasm;
 
@@ -31,6 +32,7 @@ pub use session::Session;
 pub use spec_ops::SPEC_INGOT;
 pub use target::Target;
 pub use test::{CaseResult, TestOptions, TestReport, WasmRunner};
+pub use toolchain::{check_pin, toolchain};
 pub use wasm::WasmModule;
 
 /// The Fe release whose compiler crates this crate links. A project pinned

@@ -53,7 +53,9 @@ impl std::error::Error for CompileError {}
 impl From<CompileError> for femp_core::Error {
     fn from(error: CompileError) -> Self {
         match error {
-            CompileError::Rejected(output) => Self::Rejected { output },
+            CompileError::Rejected(output) => Self::Rejected {
+                output: output.trim_end().to_string(),
+            },
             other => Self::Compiler(other.to_string()),
         }
     }

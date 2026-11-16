@@ -181,7 +181,8 @@ mod tests {
     fn formats_elapsed_time_in_six_columns() {
         assert_eq!(seconds(Duration::from_micros(400)), "0.0004");
         assert_eq!(seconds(Duration::from_millis(12_345)), "12.345");
-        assert_eq!(seconds(Duration::from_secs(1234)), "  1234");
+        assert_eq!(seconds(Duration::from_secs(1234)), "1234.0");
+        assert_eq!(seconds(Duration::from_secs(123_456)), "123456");
     }
 
     #[test]

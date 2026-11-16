@@ -5,6 +5,7 @@ mod manifest;
 
 use std::path::Path;
 
+use femp_compiler::{Target, TestOptions, WasmRunner};
 use femp_core::artifact::{Artifact, copy_flat};
 use femp_core::environment::Environment;
 use femp_core::outcome::TestRun;
@@ -12,13 +13,11 @@ use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
 use femp_core::{Error, Result};
-use femp_compiler::{Target, TestOptions, WasmRunner};
-use femp_toolchain::node::MIN_MAJOR as MIN_NODE_MAJOR;
+use femp_host::node::MIN_MAJOR as MIN_NODE_MAJOR;
 
 pub use build::{MANIFEST, MODULE};
 
 pub const ID: &str = "wasm";
-const BACKEND: &str = "wasm";
 
 pub struct WasmPlatform {
     id: PlatformId,
@@ -51,16 +50,10 @@ impl Platform for WasmPlatform {
         Stability::Experimental
     }
 
-    fn capability(&self, environment: &Environment) -> Capability {
-        if environment.toolchain.supports(BACKEND) {
-            Capability::Available
-        } else {
-            Capability::unavailable(
-                "this build of the Fe compiler has no WebAssembly backend \
-                 (released binaries are built without it)",
-                "run `femp toolchain install`",
-            )
-        }
+    // Building needs nothing but the linked compiler; running tests and
+    // properties needs Node.js, which those commands ask for.
+    fn capability(&self, _environment: &Environment) -> Capability {
+        Capability::Available
     }
 
     fn binding_kinds(&self) -> &[&'static str] {

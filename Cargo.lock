@@ -2123,12 +2123,12 @@ dependencies = [
  "femp-compiler",
  "femp-core",
  "femp-evm",
+ "femp-host",
  "femp-native",
  "femp-prop",
  "femp-prove",
  "femp-spec",
  "femp-testing",
- "femp-toolchain",
  "femp-vir",
  "femp-wasm",
  "serde_json",
@@ -2193,6 +2193,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "femp-host"
+version = "0.1.0"
+dependencies = [
+ "femp-core",
+ "tempfile",
+]
+
+[[package]]
 name = "femp-native"
 version = "0.1.0"
 dependencies = [
@@ -2242,14 +2250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "femp-toolchain"
-version = "0.1.0"
-dependencies = [
- "femp-core",
- "tempfile",
-]
-
-[[package]]
 name = "femp-vir"
 version = "0.1.0"
 dependencies = [
@@ -2263,7 +2263,7 @@ dependencies = [
  "femp-compiler",
  "femp-core",
  "femp-harness",
- "femp-toolchain",
+ "femp-host",
  "serde",
  "serde_json",
 ]

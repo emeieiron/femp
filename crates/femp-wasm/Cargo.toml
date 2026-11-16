@@ -10,7 +10,7 @@ repository.workspace = true
 [dependencies]
 femp-compiler.workspace = true
 femp-core.workspace = true
-femp-toolchain.workspace = true
+femp-host.workspace = true
 femp-harness.workspace = true
 serde.workspace = true
 serde_json.workspace = true

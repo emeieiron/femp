@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+use crate::home::home_dir;
 use crate::process::capture;
-use crate::resolve::home_dir;
 
 pub const NODE_ENV: &str = "FEMP_NODE";
 pub const MIN_MAJOR: u32 = 20;

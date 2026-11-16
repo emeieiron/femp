@@ -9,7 +9,6 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
-use femp_compiler::LINKED_FE_VERSION;
 use femp_core::artifact::write_file;
 use femp_core::environment::OptLevel;
 use femp_core::project::BUILD_DIR;
@@ -48,15 +47,9 @@ pub fn run(args: &ProveArgs) -> Result<bool> {
     let solver = session.environment.host.z3.clone().ok_or_else(|| {
         anyhow!(
             "`femp prove` needs the Z3 solver: install `z3`, or point {} at it",
-            femp_toolchain::solver::Z3_ENV
+            femp_host::solver::Z3_ENV
         )
     })?;
-    let pinned = &session.project.manifest.toolchain.fe;
-    if pinned != LINKED_FE_VERSION {
-        console::warning(&format!(
-            "the project pins Fe {pinned}, but femp proves with the Fe {LINKED_FE_VERSION} front end"
-        ));
-    }
 
     let out_dir = project.root.join(BUILD_DIR).join(PROVE_DIR);
     let options = plan::Options {

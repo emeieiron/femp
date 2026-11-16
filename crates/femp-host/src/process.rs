@@ -42,17 +42,3 @@ pub fn try_stdout(program: &str, args: &[&str]) -> Option<String> {
     let captured = capture(Command::new(program).args(args)).ok()?;
     captured.success.then_some(captured.stdout)
 }
-
-pub fn run_attached(command: &mut Command) -> Result<()> {
-    let status = command.status().map_err(|error| {
-        Error::Toolchain(format!("could not run `{}`: {error}", describe(command)))
-    })?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(Error::Toolchain(format!(
-            "`{}` exited with {status}",
-            describe(command)
-        )))
-    }
-}

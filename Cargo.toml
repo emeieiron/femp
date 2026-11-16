@@ -11,7 +11,7 @@ repository = "https://github.com/emeieiron/femp"
 
 [workspace.dependencies]
 femp-core = { path = "crates/femp-core" }
-femp-toolchain = { path = "crates/femp-toolchain" }
+femp-host = { path = "crates/femp-host" }
 femp-evm = { path = "crates/femp-evm" }
 femp-native = { path = "crates/femp-native" }
 femp-wasm = { path = "crates/femp-wasm" }

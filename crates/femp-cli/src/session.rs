@@ -5,7 +5,7 @@ use femp_core::environment::{Environment, OptLevel};
 use femp_core::layering;
 use femp_core::platform::{Capability, Context, Platform, PlatformRegistry};
 use femp_core::project::Project;
-use femp_toolchain::probe;
+use femp_host::probe;
 
 use crate::console;
 use crate::generation::{self, StagedProject};
@@ -43,7 +43,11 @@ impl Session {
         let project = Project::discover(&current_dir)?;
         let registry = registry::platforms();
         layering::validate(&project, &registry)?;
-        let environment = probe::environment(&project.manifest.toolchain.fe)?;
+        femp_compiler::check_pin(&project.manifest.toolchain.fe)?;
+        let environment = Environment {
+            toolchain: femp_compiler::toolchain(),
+            host: probe::host(),
+        };
         Ok(Self {
             project,
             registry,
