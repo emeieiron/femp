@@ -30,6 +30,8 @@ pub enum Command {
     Test(TestArgs),
     /// Run property and differential tests with generated inputs on every platform
     Prop(PropArgs),
+    /// Prove properties, machines and specs for all inputs with an SMT solver
+    Prove(ProveArgs),
     /// Build, then collect distributable packages under `dist/`
     Package(BuildArgs),
     /// Remove build and package output
@@ -139,6 +141,56 @@ pub struct PropArgs {
     /// Also write the report as JSON to `build/prop/report.json`
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args)]
+pub struct ProveArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Only prove claims whose name contains this text
+    #[arg(short, long, value_name = "PATTERN")]
+    pub filter: Option<String>,
+
+    /// Seconds the solver may spend on each assertion
+    #[arg(long, value_name = "SECONDS", default_value_t = 20)]
+    pub timeout: u64,
+
+    /// Times a loop without an `invariant(..)` is unrolled
+    #[arg(long, value_name = "N", default_value_t = 8)]
+    pub unroll: u32,
+
+    /// Steps the search for a machine counterexample takes from `#[init]`
+    #[arg(long, value_name = "K", default_value_t = 6)]
+    pub steps: u32,
+
+    /// Tasks proved at once; the number of CPUs by default
+    #[arg(long, value_name = "N")]
+    pub jobs: Option<usize>,
+
+    /// Report counterexamples without running them on the compiled targets
+    #[arg(long)]
+    pub no_replay: bool,
+
+    /// List the claims instead of proving them
+    #[arg(long)]
+    pub list: bool,
+
+    /// Also write the report as JSON to `build/prove/report.json`
+    #[arg(long)]
+    pub json: bool,
+
+    /// Write each task's VIR after every pass under `build/prove/vir`
+    #[arg(long)]
+    pub dump_vir: bool,
+
+    /// Keep each task's SMT-LIB script under `build/prove/smt`
+    #[arg(long)]
+    pub keep_smt: bool,
+
+    /// Also fail on claims the prover does not support
+    #[arg(long)]
+    pub strict: bool,
 }
 
 fn parse_opt_level(text: &str) -> Result<OptLevel, String> {

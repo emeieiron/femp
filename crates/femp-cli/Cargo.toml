@@ -20,6 +20,9 @@ femp-wasm.workspace = true
 femp-testing.workspace = true
 femp-prop.workspace = true
 femp-spec.workspace = true
+femp-vir.workspace = true
+femp-frontend.workspace = true
+femp-prove.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }
 serde_json.workspace = true

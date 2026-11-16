@@ -1,3 +1,4 @@
+mod claims;
 mod cli;
 mod commands;
 mod console;
@@ -21,6 +22,7 @@ fn main() -> ExitCode {
         Command::Build(args) => commands::build::run(&args),
         Command::Test(args) => commands::test::run(&args),
         Command::Prop(args) => commands::prop::run(&args),
+        Command::Prove(args) => commands::prove::run(&args),
         Command::Package(args) => commands::package::run(&args),
         Command::Clean => commands::clean::run(),
         Command::Generate => std::env::current_dir()

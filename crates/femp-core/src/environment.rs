@@ -28,6 +28,9 @@ pub struct Host {
     pub node: Option<PathBuf>,
     pub node_major: Option<u32>,
     pub has_c_compiler: bool,
+    /// The Z3 solver that proves claims, and its version.
+    pub z3: Option<PathBuf>,
+    pub z3_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

@@ -1,0 +1,21 @@
+[package]
+name = "femp-prove"
+description = "Proves Fe Multiplatform claims for all inputs with an SMT solver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+femp-core.workspace = true
+femp-spec.workspace = true
+femp-vir.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+femp-frontend.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
