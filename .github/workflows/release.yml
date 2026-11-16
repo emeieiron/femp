@@ -34,11 +34,11 @@ jobs:
             runner: ubuntu-22.04-arm
             smoke: true
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-latest
             smoke: true
           # Cross-compiled on Apple silicon.
           - target: x86_64-apple-darwin
-            runner: macos-14
+            runner: macos-latest
             smoke: false
     steps:
       - uses: actions/checkout@v4
