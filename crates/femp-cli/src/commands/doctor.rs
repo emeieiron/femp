@@ -58,6 +58,13 @@ fn print_environment(environment: &Environment) {
             "not found"
         }
     ));
+    console::line(format!(
+        "  z3         {}",
+        match (&host.z3, &host.z3_version) {
+            (Some(path), Some(version)) => format!("{version} ({})", path.display()),
+            _ => "not found (needed by `femp prove`)".to_string(),
+        }
+    ));
 }
 
 fn print_platforms(registry: &PlatformRegistry, environment: &Environment) -> Vec<PlatformId> {

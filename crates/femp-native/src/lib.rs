@@ -151,6 +151,8 @@ mod tests {
                 arch: arch.to_string(),
                 node: None,
                 node_major: None,
+                z3: None,
+                z3_version: None,
                 has_c_compiler,
             },
         }

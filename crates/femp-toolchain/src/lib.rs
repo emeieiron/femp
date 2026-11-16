@@ -5,4 +5,5 @@ pub mod node;
 pub mod probe;
 pub mod process;
 pub mod resolve;
+pub mod solver;
 pub mod test_output;

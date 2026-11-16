@@ -1,0 +1,51 @@
+use core::marker::Copy
+
+pub struct Range { pub low: u8, pub high: u8 }
+
+impl Copy for Range {}
+
+impl Range {
+    pub fn width(self) -> u8 {
+        if self.high >= self.low {
+            self.high - self.low
+        } else {
+            0
+        }
+    }
+}
+
+/// Holds: the width never exceeds the high end.
+#[property]
+pub fn width_is_bounded(low: u8, high: u8) -> bool {
+    Range { low, high }.width() <= high
+}
+
+/// Fails from 200 on: `x + 56` overflows `u8`.
+#[property]
+#[gen(x = "100..=255")]
+pub fn sum_fits(x: u8) -> bool {
+    x + 56 > x
+}
+
+/// Holds: a running total through a local variable.
+#[property]
+#[gen(a = "0..=10", b = "0..=10")]
+pub fn total_is_small(a: u32, b: u32) -> bool {
+    var total: u32 = a
+    if b > 5 { total = total + b }
+    total <= 20
+}
+
+/// Fails at 3: the third element is read past a short prefix.
+#[property]
+#[gen(i = "0..=3")]
+pub fn index_in_bounds(i: u8) -> bool {
+    let xs: [u64; 3] = [1, 2, 3]
+    xs[i as usize] > 0
+}
+
+/// Fails for every negative divisor below -1 when the dividend is the minimum.
+#[property]
+pub fn division_is_safe(a: i8, b: i8) -> bool {
+    if b == 0 { true } else { a / b <= 127 }
+}

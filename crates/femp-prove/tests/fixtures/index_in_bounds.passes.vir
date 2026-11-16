@@ -1,0 +1,162 @@
+// after scope
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  v6: bool = call f1(v0)  @src/lib.fe:42
+  assert v6 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+
+// after recursion
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  v6: bool = call f1(v0)  @src/lib.fe:42
+  assert v6 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+
+// after inline
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  goto bb1()  @src/lib.fe:42
+bb1:
+  goto bb2()
+bb2:
+  v10: u64 = 1  @src/lib.fe:43
+  v9: u64 = v10  @src/lib.fe:43
+  v12: u64 = 2  @src/lib.fe:43
+  v11: u64 = v12  @src/lib.fe:43
+  v14: u64 = 3  @src/lib.fe:43
+  v13: u64 = v14  @src/lib.fe:43
+  v15: [u64; 3] = make [u64; 3] {v9, v11, v13}  @src/lib.fe:43
+  v16: [u64; 3] = v15  @src/lib.fe:43
+  v17: u8 = v0  @src/lib.fe:44
+  v18: u256 = cast v17 to u256  @src/lib.fe:44
+  check_index v18 < 3  @src/lib.fe:44
+  v19: u64 = v16[v18]  @src/lib.fe:44
+  v21: u64 = 0  @src/lib.fe:44
+  v20: u64 = v21  @src/lib.fe:44
+  v22: bool = gt v19, v20  @src/lib.fe:44
+  goto bb3(v22)  @src/lib.fe:42
+bb3(v6: bool):
+  assert v6 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+
+// after slots
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  goto bb1()  @src/lib.fe:42
+bb1:
+  goto bb2()
+bb2:
+  v10: u64 = 1  @src/lib.fe:43
+  v9: u64 = v10  @src/lib.fe:43
+  v12: u64 = 2  @src/lib.fe:43
+  v11: u64 = v12  @src/lib.fe:43
+  v14: u64 = 3  @src/lib.fe:43
+  v13: u64 = v14  @src/lib.fe:43
+  v15: [u64; 3] = make [u64; 3] {v9, v11, v13}  @src/lib.fe:43
+  v16: [u64; 3] = v15  @src/lib.fe:43
+  v17: u8 = v0  @src/lib.fe:44
+  v18: u256 = cast v17 to u256  @src/lib.fe:44
+  check_index v18 < 3  @src/lib.fe:44
+  v19: u64 = v16[v18]  @src/lib.fe:44
+  v21: u64 = 0  @src/lib.fe:44
+  v20: u64 = v21  @src/lib.fe:44
+  v22: bool = gt v19, v20  @src/lib.fe:44
+  goto bb3(v22)  @src/lib.fe:42
+bb3(v6: bool):
+  assert v6 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+
+// after checks
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  goto bb1()  @src/lib.fe:42
+bb1:
+  goto bb2()
+bb2:
+  v10: u64 = 1  @src/lib.fe:43
+  v9: u64 = v10  @src/lib.fe:43
+  v12: u64 = 2  @src/lib.fe:43
+  v11: u64 = v12  @src/lib.fe:43
+  v14: u64 = 3  @src/lib.fe:43
+  v13: u64 = v14  @src/lib.fe:43
+  v15: [u64; 3] = make [u64; 3] {v9, v11, v13}  @src/lib.fe:43
+  v16: [u64; 3] = v15  @src/lib.fe:43
+  v17: u8 = v0  @src/lib.fe:44
+  v18: u256 = cast v17 to u256  @src/lib.fe:44
+  v23: u256 = 3  @src/lib.fe:44
+  v24: bool = lt v18, v23  @src/lib.fe:44
+  assert v24 [panic: index out of bounds]  @src/lib.fe:44
+  v19: u64 = v16[v18]  @src/lib.fe:44
+  v21: u64 = 0  @src/lib.fe:44
+  v20: u64 = v21  @src/lib.fe:44
+  v22: bool = gt v19, v20  @src/lib.fe:44
+  goto bb3(v22)  @src/lib.fe:42
+bb3(v6: bool):
+  assert v6 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+
+// after simplify
+prove index_in_bounds() -> ()  @src/lib.fe:42
+bb0:
+  v0 i: u8 = havoc  @src/lib.fe:42
+  v1: u8 = 0  @src/lib.fe:42
+  v2: u8 = 3  @src/lib.fe:42
+  v3: bool = ge v0, v1  @src/lib.fe:42
+  v4: bool = le v0, v2  @src/lib.fe:42
+  v5: bool = and v3, v4  @src/lib.fe:42
+  assume v5  @src/lib.fe:42
+  v10: u64 = 1  @src/lib.fe:43
+  v12: u64 = 2  @src/lib.fe:43
+  v14: u64 = 3  @src/lib.fe:43
+  v15: [u64; 3] = make [u64; 3] {v10, v12, v14}  @src/lib.fe:43
+  v18: u256 = cast v0 to u256  @src/lib.fe:44
+  v23: u256 = 3  @src/lib.fe:44
+  v24: bool = lt v18, v23  @src/lib.fe:44
+  assert v24 [panic: index out of bounds]  @src/lib.fe:44
+  v19: u64 = v15[v18]  @src/lib.fe:44
+  v21: u64 = 0  @src/lib.fe:44
+  v22: bool = gt v19, v21  @src/lib.fe:44
+  assert v22 [returns false]  @src/lib.fe:42
+  v7: () = ()  @src/lib.fe:42
+  return v7  @src/lib.fe:42
+

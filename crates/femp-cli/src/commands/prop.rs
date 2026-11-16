@@ -1,12 +1,11 @@
-use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow};
 use femp_core::artifact::write_file;
 use femp_core::environment::OptLevel;
 use femp_core::platform::Platform;
-use femp_core::project::{BUILD_DIR, Module, Project};
+use femp_core::project::{BUILD_DIR, Module};
 use femp_core::property::{Executor, HarnessRequest, Suite};
 use femp_prop::compare;
 use femp_prop::engine::{Config, Engine, Target, format_seed};
@@ -14,8 +13,9 @@ use femp_prop::generators::Registry;
 use femp_prop::regress::Store;
 use femp_prop::report::{self, RunReport};
 use femp_prop::rng::derive;
-use femp_spec::discover;
+use femp_spec::Claims;
 
+use crate::claims;
 use crate::cli::PropArgs;
 use crate::console;
 use crate::session::Session;
@@ -37,15 +37,23 @@ pub fn run(args: &PropArgs) -> Result<bool> {
     let levels = &args.optimize;
     let project = inputs.context(levels[0]).project;
 
-    let suites = discover_all(project, &platforms, args.filter.as_deref())?;
-    if suites.is_empty() {
+    let found: Vec<(&Module, Claims)> =
+        claims::discover_all(project, &platforms, args.filter.as_deref())?
+            .into_iter()
+            .filter(|(_, claims)| !claims.suite.is_empty())
+            .collect();
+    if found.is_empty() {
         console::warning("no `#[property]`, `#[differential]` or `#[machine]` entry points found");
         return Ok(true);
     }
     if args.list {
-        list(&suites);
+        claims::list(&found, false);
         return Ok(true);
     }
+    let suites: Vec<(&Module, Suite)> = found
+        .into_iter()
+        .map(|(module, claims)| (module, claims.suite))
+        .collect();
 
     let seed = match &args.seed {
         Some(text) => parse_seed(text)?,
@@ -154,92 +162,6 @@ pub fn run(args: &PropArgs) -> Result<bool> {
         console::step("Wrote", &console::relative(&path, &project.root));
     }
     Ok(report.succeeded())
-}
-
-// Shared modules run on every selected platform, platform modules on their
-// own; a module without entry points needs no harness.
-fn discover_all<'a>(
-    project: &'a Project,
-    platforms: &[&dyn Platform],
-    filter: Option<&str>,
-) -> Result<Vec<(&'a Module, Suite)>> {
-    let mut suites = Vec::new();
-    let mut problems = Vec::new();
-    for module in project.modules.iter().filter(|module| {
-        module.is_shared()
-            || platforms
-                .iter()
-                .any(|platform| module.platform() == Some(platform.id()))
-    }) {
-        match discover(module).map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|mut error| {
-                    error.location.file = relative(&error.location.file, &project.root);
-                    error
-                })
-                .collect::<Vec<_>>()
-        }) {
-            Ok(claims) => {
-                let mut suite = claims.suite;
-                relativize(&mut suite, &project.root);
-                if let Some(pattern) = filter {
-                    suite
-                        .properties
-                        .retain(|property| property.name.contains(pattern));
-                    suite
-                        .machines
-                        .retain(|machine| machine.name.contains(pattern));
-                }
-                if !suite.is_empty() {
-                    suites.push((module, suite));
-                }
-            }
-            Err(errors) => problems.extend(errors),
-        }
-    }
-    if !problems.is_empty() {
-        for problem in &problems {
-            console::error(&problem.to_string());
-        }
-        bail!("{} invalid property declaration(s)", problems.len());
-    }
-    Ok(suites)
-}
-
-fn relative(path: &Path, root: &Path) -> PathBuf {
-    path.strip_prefix(root).unwrap_or(path).to_path_buf()
-}
-
-// Messages and regression files name sources relative to the project.
-fn relativize(suite: &mut Suite, root: &Path) {
-    for property in &mut suite.properties {
-        property.location.file = relative(&property.location.file, root);
-    }
-    for machine in &mut suite.machines {
-        machine.location.file = relative(&machine.location.file, root);
-    }
-}
-
-fn list(suites: &[(&Module, Suite)]) {
-    for (module, suite) in suites {
-        for property in &suite.properties {
-            let kind = match property.kind {
-                femp_core::property::PropertyKind::Holds => "property",
-                femp_core::property::PropertyKind::Agrees => "differential",
-            };
-            console::line(format!(
-                "{}::{}  {kind}  {}",
-                module.name, property.name, property.location
-            ));
-        }
-        for machine in &suite.machines {
-            console::line(format!(
-                "{}::{}  machine  {}",
-                module.name, machine.name, machine.location
-            ));
-        }
-    }
 }
 
 fn parse_seed(text: &str) -> Result<u64> {

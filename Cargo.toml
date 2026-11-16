@@ -20,6 +20,7 @@ femp-prop = { path = "crates/femp-prop" }
 femp-spec = { path = "crates/femp-spec" }
 femp-vir = { path = "crates/femp-vir" }
 femp-frontend = { path = "crates/femp-frontend" }
+femp-prove = { path = "crates/femp-prove" }
 femp-harness = { path = "crates/femp-harness" }
 
 # The Fe compiler, linked only into femp-frontend. Keep the tag in step with

@@ -9,6 +9,7 @@ use femp_core::environment::{Environment, Host, Toolchain};
 use crate::node;
 use crate::process::{capture, try_stdout};
 use crate::resolve::{ensure_version, locate};
+use crate::solver;
 
 pub fn environment(pinned_version: &str) -> Result<Environment> {
     let fe = locate(pinned_version)?;
@@ -26,12 +27,15 @@ pub fn environment(pinned_version: &str) -> Result<Environment> {
 
 pub fn host() -> Host {
     let node = node::found();
+    let z3 = solver::found();
     Host {
         os: env::consts::OS.to_string(),
         arch: env::consts::ARCH.to_string(),
         node: node.map(|node| node.path.clone()),
         node_major: node.map(|node| node.major),
         has_c_compiler: try_stdout("cc", &["--version"]).is_some(),
+        z3: z3.map(|z3| z3.path.clone()),
+        z3_version: z3.map(|z3| z3.version.clone()),
     }
 }
 

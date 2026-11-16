@@ -1778,11 +1778,14 @@ dependencies = [
  "clap",
  "femp-core",
  "femp-evm",
+ "femp-frontend",
  "femp-native",
  "femp-prop",
+ "femp-prove",
  "femp-spec",
  "femp-testing",
  "femp-toolchain",
+ "femp-vir",
  "femp-wasm",
  "serde_json",
  "tempfile",
@@ -1855,6 +1858,18 @@ dependencies = [
  "femp-spec",
  "serde",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "femp-prove"
+version = "0.1.0"
+dependencies = [
+ "femp-core",
+ "femp-frontend",
+ "femp-spec",
+ "femp-vir",
+ "serde",
  "tempfile",
 ]
 
