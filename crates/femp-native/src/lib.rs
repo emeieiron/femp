@@ -3,6 +3,7 @@ mod harness;
 
 use std::path::Path;
 
+use femp_compiler::{Target, TestOptions};
 use femp_core::Result;
 use femp_core::artifact::{Artifact, copy_flat};
 use femp_core::environment::{Environment, Host};
@@ -10,12 +11,10 @@ use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
-use femp_compiler::{Target, TestOptions};
 
 pub use build::EXECUTABLE;
 
 pub const ID: &str = "native";
-const BACKEND: &str = "native";
 const SUPPORTED_HOSTS: &[(&str, &str)] = &[("linux", "x86_64"), ("macos", "aarch64")];
 
 pub struct NativePlatform {
@@ -50,12 +49,6 @@ impl Platform for NativePlatform {
     }
 
     fn capability(&self, environment: &Environment) -> Capability {
-        if !environment.toolchain.supports(BACKEND) {
-            return Capability::unavailable(
-                "this build of the Fe compiler has no native backend",
-                "run `femp toolchain install`",
-            );
-        }
         if !host_is_supported(&environment.host) {
             return Capability::Unavailable {
                 reason: format!(
@@ -135,22 +128,11 @@ fn host_is_supported(host: &Host) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use femp_core::environment::Toolchain;
-
     use super::*;
 
-    fn environment(backends: &[&str], os: &str, arch: &str, has_c_compiler: bool) -> Environment {
+    fn environment(os: &str, arch: &str, has_c_compiler: bool) -> Environment {
         Environment {
-            toolchain: Toolchain {
-                fe: "fe".into(),
-                version: "26.6.0".to_string(),
-                backends: backends
-                    .iter()
-                    .map(|b| b.to_string())
-                    .collect::<BTreeSet<_>>(),
-            },
+            toolchain: femp_compiler::toolchain(),
             host: Host {
                 os: os.to_string(),
                 arch: arch.to_string(),
@@ -168,23 +150,22 @@ mod tests {
         let platform = NativePlatform::new();
         assert!(
             platform
-                .capability(&environment(&["native"], "macos", "aarch64", true))
+                .capability(&environment("macos", "aarch64", true))
                 .is_available()
         );
         assert!(
             platform
-                .capability(&environment(&["native"], "linux", "x86_64", true))
+                .capability(&environment("linux", "x86_64", true))
                 .is_available()
         );
     }
 
     #[test]
-    fn unavailable_without_backend_host_or_linker() {
+    fn unavailable_without_a_supported_host_or_linker() {
         let platform = NativePlatform::new();
         for environment in [
-            environment(&["sonatina"], "macos", "aarch64", true),
-            environment(&["native"], "windows", "x86_64", true),
-            environment(&["native"], "macos", "aarch64", false),
+            environment("windows", "x86_64", true),
+            environment("macos", "aarch64", false),
         ] {
             assert!(!platform.capability(&environment).is_available());
         }

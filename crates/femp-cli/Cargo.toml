@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 femp-core.workspace = true
-femp-toolchain.workspace = true
+femp-host.workspace = true
 femp-evm.workspace = true
 femp-native.workspace = true
 femp-wasm.workspace = true

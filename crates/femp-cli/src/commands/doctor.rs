@@ -6,23 +6,17 @@ use femp_core::environment::Environment;
 use femp_core::layering;
 use femp_core::platform::{Capability, PlatformId, PlatformRegistry, Stability};
 use femp_core::project::Project;
-use femp_toolchain::probe;
+use femp_host::probe;
 
-use crate::commands::toolchain::pinned_version;
 use crate::console;
 use crate::generation;
 use crate::registry;
 
 pub fn run() -> Result<bool> {
     let registry = registry::platforms();
-    let version = pinned_version();
-
-    let environment = match probe::environment(&version) {
-        Ok(environment) => environment,
-        Err(error) => {
-            console::error(&error.to_string());
-            return Ok(false);
-        }
+    let environment = Environment {
+        toolchain: femp_compiler::toolchain(),
+        host: probe::host(),
     };
     print_environment(&environment);
     let unavailable = print_platforms(&registry, &environment);
@@ -32,15 +26,13 @@ pub fn run() -> Result<bool> {
 fn print_environment(environment: &Environment) {
     let toolchain = &environment.toolchain;
     let host = &environment.host;
-    let backends: Vec<&str> = toolchain.backends.iter().map(String::as_str).collect();
 
-    console::line("Toolchain");
+    console::line("Compiler");
     console::line(format!(
-        "  fe         {} ({})",
-        toolchain.version,
-        toolchain.fe.display()
+        "  fe         {} ({}), linked into femp",
+        toolchain.version, toolchain.commit
     ));
-    console::line(format!("  backends   {}", backends.join(", ")));
+    console::line(format!("  backends   {}", toolchain.backends.join(", ")));
     console::line("Host");
     console::line(format!("  system     {} {}", host.arch, host.os));
     console::line(format!(
@@ -121,6 +113,10 @@ fn print_project(registry: &PlatformRegistry, unavailable: &[PlatformId]) -> boo
         return false;
     }
     console::line("  layout     ok");
+    if let Err(error) = femp_compiler::check_pin(&project.manifest.toolchain.fe) {
+        console::error(&error.to_string());
+        return false;
+    }
 
     let blocked: Vec<String> = project
         .platform_ids()

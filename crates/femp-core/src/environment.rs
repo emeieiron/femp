@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -7,17 +6,13 @@ pub struct Environment {
     pub host: Host,
 }
 
+/// The Fe compiler femp is built with.
 #[derive(Debug, Clone)]
 pub struct Toolchain {
-    pub fe: PathBuf,
     pub version: String,
-    pub backends: BTreeSet<String>,
-}
-
-impl Toolchain {
-    pub fn supports(&self, backend: &str) -> bool {
-        self.backends.contains(backend)
-    }
+    pub commit: String,
+    /// The backends it compiles with, as it names them.
+    pub backends: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

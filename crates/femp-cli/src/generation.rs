@@ -11,7 +11,7 @@ use femp_core::manifest::GeneratorSection;
 use femp_core::platform::Platform;
 use femp_core::project::{BUILD_DIR, Module, Project};
 use femp_core::workspace::Workspace;
-use femp_toolchain::process::describe;
+use femp_host::process::describe;
 use toml::{Table, Value};
 
 use crate::console;

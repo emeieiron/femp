@@ -1,6 +1,6 @@
 [package]
-name = "femp-toolchain"
-description = "Locates, installs, and invokes the Fe compiler for Fe Multiplatform"
+name = "femp-host"
+description = "Finds the host programs Fe Multiplatform runs compiled code and proofs with"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
