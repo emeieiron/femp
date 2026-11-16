@@ -163,6 +163,16 @@ one WebAssembly call that reads the sequence from a host file.
 7. **Replay and report** (`femp-cli`): counterexamples run on the property harnesses, are judged
    as `femp prop` judges them, and are saved as regressions. The report renders as text or JSON.
 
+A contract (`femp-compiler/src/lower/contract.rs`) is lowered as a machine over its storage:
+`init` and each `recv` arm become handlers that take the message's fields, the EVM context and
+the storage, and return the storage they leave; wrappers give them the machine shape, with the
+context fields each one reads as arguments. Storage fields are slots of the handler, the context
+is one value of `std::evm::Evm` whose fields `Ctx` reads (`lower/evm.rs`), and functions that
+reach a contract's context, storage or `with`-bound effects take them as further parameters.
+The machine obligations run its handlers in trusted blocks, where a panic, which reverts the
+transaction, ends the execution instead of failing it. A refuting sequence is sent to the
+compiled contract by the platform's `run_contract`.
+
 ## Compiler and host
 
 The compiler is part of femp: `femp-compiler` links the crates of one Fe release

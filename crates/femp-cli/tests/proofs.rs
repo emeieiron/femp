@@ -144,8 +144,11 @@ fn the_demonstrator_claims_are_proved() {
     let contract = entry(&report, "contracts::VestingContractMachine");
     assert!(contract.starts_with("UNSUPPORTED"), "{contract}");
     assert!(contract.contains("at evm/src/machines.fe:"), "{contract}");
+    let storage = entry(&report, "contracts::Vesting");
+    assert!(storage.starts_with("PROVED"), "{report}");
+    assert!(storage.contains("on evm"), "{storage}");
     assert!(
-        report.contains("10 proved, 0 refuted, 0 unknown, 1 not supported"),
+        report.contains("11 proved, 0 refuted, 0 unknown, 1 not supported"),
         "{report}"
     );
     let lenient = femp(project.path(), &["prove", "-f", "vest"]);

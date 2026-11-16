@@ -93,7 +93,7 @@ build links one release, and refuses a project pinned to another.
 | `femp build [-t <platform>] [-O <level>]` | Compiles platform modules into `build/` and generates bindings. |
 | `femp test [-t <platform>] [-f <pattern>]` | Runs shared tests on every platform and compares the outcomes. |
 | `femp prop [-t <platform>] [-f <pattern>] [--seed <n>]` | Runs properties, differentials and state machines with generated inputs on every platform, and minimizes failures. |
-| `femp prove [-t <platform>] [-f <pattern>]` | Proves the same claims, and `#[spec]` functions, for all inputs, and replays counterexamples on every platform. |
+| `femp prove [-t <platform>] [-f <pattern>]` | Proves the same claims, `#[spec]` functions and contract `#[invariant]`s for all inputs, and replays counterexamples on every platform. |
 | `femp package` | Builds, then collects distributable packages and a hash index under `dist/`. |
 | `femp clean` | Removes `build/` and `dist/`. |
 
@@ -198,7 +198,24 @@ REFUTED     core::halves_stay_small           returns false
             saved to regressions/core/halves_stay_small.json
 ```
 
-See [docs/proving.md](docs/proving.md) for specs, loops, verdicts and limits.
+A contract's `#[invariant]`s are proved for every sequence of messages it can receive. A
+broken one comes back as a sequence from deployment, which is run on the compiled contract:
+
+```fe
+#[invariant]
+fn claims_stay_within_total(store: VestingStore) -> bool {
+    store.claimed <= store.total
+}
+```
+
+```
+REFUTED     contracts::Vesting  invariant `claims_stay_within_total` fails after step 1
+            init(total = 1, start = 0, cliff = 0, duration = 1)
+            1. Claim(ctx.timestamp = 1, amount = 1)
+            evm accepts every transaction
+```
+
+See [docs/proving.md](docs/proving.md) for specs, contracts, loops, verdicts and limits.
 
 ## Repository
 
