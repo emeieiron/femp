@@ -221,11 +221,17 @@ fn contract_machine(claim: &StorageClaim, contract: &LoweredContract) -> (Machin
         }
     }
     let arms: Vec<machine::ContractHandler<'_>> = contract.arms.iter().map(handler).collect();
-    let invariants: Vec<(&str, femp_vir::FuncId)> = claim
+    let invariants: Vec<(&str, &[femp_core::property::Param], femp_vir::FuncId)> = claim
         .invariants
         .iter()
         .zip(&contract.invariants)
-        .map(|(invariant, func)| (invariant.name.as_str(), *func))
+        .map(|(invariant, lowered)| {
+            (
+                invariant.name.as_str(),
+                lowered.params.as_slice(),
+                lowered.func,
+            )
+        })
         .collect();
     machine::contract_machine(
         &claim.name,

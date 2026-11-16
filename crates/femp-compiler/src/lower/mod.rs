@@ -21,7 +21,7 @@ use crate::session::Session;
 use crate::spans;
 use crate::types::Types;
 
-pub use contract::{ContractRoot, Handler, LoweredContract};
+pub use contract::{ContractRoot, Handler, Invariant, LoweredContract};
 
 /// The program for a set of roots, and for each root its function or why it
 /// cannot be lowered; likewise for each contract.

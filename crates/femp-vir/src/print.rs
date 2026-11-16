@@ -230,6 +230,7 @@ impl Printer<'_> {
             Expr::IsVariant { value, variant } => format!("is {value} #{variant}"),
             Expr::Tag { value } => format!("tag {value}"),
             Expr::Repeat { value, len } => format!("repeat {value}; {len}"),
+            Expr::Fill { value } => format!("fill {value}"),
             Expr::Call { func, args } => format!("call {func}({})", Self::list(args)),
             Expr::Intrinsic { op, args } => {
                 let op = match op {

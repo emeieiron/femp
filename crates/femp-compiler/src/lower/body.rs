@@ -43,6 +43,9 @@ pub(super) enum Role {
     Handler {
         params: Vec<Type>,
         state: Type,
+        /// The pattern bindings of the message's fields, and the parameter
+        /// each starts as.
+        bindings: Vec<(hir::hir_def::PatId, usize)>,
     },
 }
 
@@ -53,8 +56,54 @@ pub(super) enum Role {
 pub(super) struct Hidden<'db> {
     env: bool,
     state: Option<hir::hir_def::Contract<'db>>,
+    /// Whether the function may write the storage it is passed.
+    writes_state: bool,
     /// The effects passed in, by their index among the function's effects.
     effects: Vec<u32>,
+}
+
+/// What an ordinary function returns besides its result: the final value of
+/// each `mut` parameter, then the storage, when it writes it. Callers write
+/// them back to the places they borrowed, which no one else can reach while
+/// the borrow lives.
+#[derive(Debug, Default)]
+pub(super) struct Shape {
+    /// The indexes of the `mut` parameters.
+    mutable: Vec<usize>,
+    writes_state: bool,
+}
+
+impl Shape {
+    fn is_plain(&self) -> bool {
+        self.mutable.is_empty() && !self.writes_state
+    }
+}
+
+pub(super) fn shape<'db>(
+    db: &'db driver::DriverDataBase,
+    instance: SemanticInstance<'db>,
+    body: &NormalizedBody<'db>,
+) -> Shape {
+    // A parameter is lent when the body receives it as a mutable borrow.
+    let mut mutable: Vec<usize> = body
+        .values
+        .iter()
+        .filter_map(|value| match value.definition {
+            NValueDefinition::EntryParam { param } => {
+                let ty = instance.normalized_ty(db, value.ty);
+                mut_target(db, ty)
+                    .is_some_and(|target| !is_evm(db, target))
+                    .then_some(param as usize)
+            }
+            _ => None,
+        })
+        .collect();
+    mutable.sort();
+    mutable.dedup();
+    Shape {
+        mutable,
+        writes_state: hidden(body).writes_state,
+    }
 }
 
 pub(super) fn hidden<'db>(body: &NormalizedBody<'db>) -> Hidden<'db> {
@@ -65,7 +114,10 @@ pub(super) fn hidden<'db>(body: &NormalizedBody<'db>) -> Hidden<'db> {
         };
         match &binding.source {
             ProviderSource::RootProvider { .. } => hidden.env = true,
-            ProviderSource::ContractField { field } => hidden.state = Some(field.contract),
+            ProviderSource::ContractField { field } => {
+                hidden.state = Some(field.contract);
+                hidden.writes_state |= binding.is_mut;
+            }
             ProviderSource::UsesParam {
                 requirement_idx, ..
             } => {
@@ -77,6 +129,20 @@ pub(super) fn hidden<'db>(body: &NormalizedBody<'db>) -> Hidden<'db> {
     }
     hidden.effects.sort();
     hidden
+}
+
+/// What a mutable borrow of type `ty` borrows, if `ty` is one.
+fn mut_target<'db>(
+    db: &'db driver::DriverDataBase,
+    ty: hir::analysis::ty::ty_def::TyId<'db>,
+) -> Option<hir::analysis::ty::ty_def::TyId<'db>> {
+    if let Some((hir::analysis::ty::ty_def::CapabilityKind::Mut, target)) = ty.as_capability(db) {
+        return Some(target);
+    }
+    match ty.as_prim(db) {
+        Some(hir::analysis::ty::ty_def::PrimTy::BorrowMut) => ty.generic_args(db).first().copied(),
+        _ => None,
+    }
 }
 
 pub(super) fn lower<'db>(
@@ -95,12 +161,46 @@ pub(super) fn lower<'db>(
         )
     })?;
     let body = &artifacts.body;
-    let result = match &role {
+    let declared = instance.normalized_result_ty(db);
+    if mut_target(db, declared).is_some() {
+        return Err(Unsupported::new(
+            span.clone(),
+            "functions that return a mutable borrow are not supported yet",
+        ));
+    }
+    let shape = match &role {
+        Role::Function => shape(db, instance, body),
+        Role::Handler { .. } => Shape::default(),
+    };
+    let plain = match &role {
         Role::Function => lx
             .types
-            .lower(db, instance, instance.normalized_result_ty(db))
+            .lower(db, instance, declared)
             .map_err(|message| Unsupported::new(span.clone(), message))?,
         Role::Handler { state, .. } => state.clone(),
+    };
+    let result = if shape.is_plain() {
+        plain.clone()
+    } else {
+        let mut parts = vec![plain.clone()];
+        for index in &shape.mutable {
+            let value = body.values.iter().find(|value| {
+                matches!(value.definition, NValueDefinition::EntryParam { param } if param as usize == *index)
+            });
+            if let Some(value) = value {
+                parts.push(
+                    lx.types
+                        .lower(db, instance, value.ty)
+                        .map_err(|message| Unsupported::new(span.clone(), message))?,
+                );
+            }
+        }
+        if shape.writes_state
+            && let Some(contract) = hidden(body).state
+        {
+            parts.push(lx.state_type(contract, instance, &span)?);
+        }
+        Type::Tuple(parts)
     };
     let mut lowering = BodyLowering {
         lx,
@@ -117,6 +217,9 @@ pub(super) fn lower<'db>(
         state: None,
         storage: Vec::new(),
         effects: HashMap::new(),
+        shape,
+        mutable: Vec::new(),
+        borrows: HashMap::new(),
     };
     lowering.run()?;
     Ok(lowering.function)
@@ -137,10 +240,21 @@ struct BodyLowering<'a, 'db> {
     env: Option<ValueId>,
     /// The contract's storage as the body found it.
     state: Option<ValueId>,
-    /// The slot holding each storage field the body uses, by field index.
-    storage: Vec<(u32, SlotId)>,
+    /// The slot holding each storage field, by field index.
+    storage: Vec<SlotId>,
     /// The value of each effect the body was passed.
     effects: HashMap<NRootId, ValueId>,
+    shape: Shape,
+    /// The slot of each `mut` parameter, and the value it starts with.
+    mutable: Vec<(SlotId, ValueId)>,
+    /// What each mutable borrow the body holds points at.
+    borrows: HashMap<NValueId, (SlotId, Vec<Proj>)>,
+}
+
+/// Where a place is: a part of a slot, or of a value standing for it.
+enum Location {
+    Slot(SlotId, Vec<Proj>),
+    Value(ValueId, Vec<Proj>),
 }
 
 /// Where a place's base leads: a slot, or a value standing for the place.
@@ -262,6 +376,14 @@ impl<'db> BodyLowering<'_, 'db> {
             if self.env.is_none() && is_evm(self.lx.db, target) {
                 self.env = Some(id);
             }
+            // A `mut` parameter lives in a slot that the function returns.
+            if self.shape.mutable.contains(&index) {
+                let slot = self.function.new_slot(self.function.ty(id).clone(), None);
+                self.mutable.push((slot, id));
+                if let Some((_, value)) = read {
+                    self.borrows.insert(*value, (slot, Vec::new()));
+                }
+            }
             self.function.params.push(id);
         }
         Ok(())
@@ -326,35 +448,42 @@ impl<'db> BodyLowering<'_, 'db> {
         Ok(())
     }
 
-    /// The storage as it stands: each field the body holds in a slot, and
-    /// the others as the body found them.
+    /// The result, with the final value of each `mut` parameter and the
+    /// storage when the function writes it.
+    fn with_lent(&mut self, result: ValueId, span: &Span) -> Lowering<ValueId> {
+        let mut parts = vec![result];
+        for (slot, _) in self.mutable.clone() {
+            let ty = self.function.slots[slot.0 as usize].ty.clone();
+            parts.push(self.fresh(
+                ty,
+                Expr::Load {
+                    slot,
+                    path: Vec::new(),
+                },
+                span.clone(),
+            ));
+        }
+        if self.shape.writes_state {
+            parts.push(self.current_state(span)?);
+        }
+        let ty = self.function.result.clone();
+        Ok(self.fresh(ty.clone(), Expr::Make { ty, fields: parts }, span.clone()))
+    }
+
+    /// The storage as it stands in the body's slots.
     fn current_state(&mut self, span: &Span) -> Lowering<ValueId> {
         let state = self
             .state
             .ok_or_else(|| self.unsupported(span, "a call that needs the contract's storage"))?;
-        if self.storage.is_empty() {
-            return Ok(state);
-        }
         let ty = self.function.ty(state).clone();
         let Type::Tuple(fields) = &ty else {
             return Err(self.unsupported(span, "storage that is not a tuple of fields"));
         };
         let mut values = Vec::new();
-        for (index, field_ty) in fields.clone().into_iter().enumerate() {
-            let held = self
-                .storage
-                .iter()
-                .find(|(field, _)| *field as usize == index)
-                .map(|(_, slot)| *slot);
-            let expr = match held {
-                Some(slot) => Expr::Load {
-                    slot,
-                    path: Vec::new(),
-                },
-                None => Expr::Project {
-                    value: state,
-                    path: vec![Proj::Field(index as u16)],
-                },
+        for (slot, field_ty) in self.storage.clone().into_iter().zip(fields.clone()) {
+            let expr = Expr::Load {
+                slot,
+                path: Vec::new(),
             };
             values.push(self.fresh(field_ty, expr, span.clone()));
         }
@@ -368,14 +497,69 @@ impl<'db> BodyLowering<'_, 'db> {
     /// Slots for the body's local storage, and the stores that give
     /// parameter places their value.
     fn slots_init(&mut self) -> Lowering<()> {
+        let span = self.function.span.clone();
+        for (slot, value) in self.mutable.clone() {
+            self.push(
+                StmtKind::Store {
+                    slot,
+                    path: Vec::new(),
+                    value,
+                },
+                span.clone(),
+            );
+        }
+        // Every field of the storage lives in a slot, since a callee may
+        // write any of them.
+        if let Some(state) = self.state {
+            let Type::Tuple(fields) = self.function.ty(state).clone() else {
+                return Err(self.unsupported(&span, "storage that is not a tuple of fields"));
+            };
+            for (index, ty) in fields.into_iter().enumerate() {
+                let slot = self.function.new_slot(ty.clone(), None);
+                let value = self.fresh(
+                    ty,
+                    Expr::Project {
+                        value: state,
+                        path: vec![Proj::Field(index as u16)],
+                    },
+                    span.clone(),
+                );
+                self.push(
+                    StmtKind::Store {
+                        slot,
+                        path: Vec::new(),
+                        value,
+                    },
+                    span.clone(),
+                );
+                self.storage.push(slot);
+            }
+        }
         for (index, root) in self.body.roots.iter().enumerate() {
             let id = NRootId::new(index);
             match &root.kind {
-                NRootKind::LocalSlot { .. } => {
+                NRootKind::LocalSlot { binding } => {
                     let span = self.span(root.origin);
                     let ty = self.ty(root.ty, &span)?;
                     let slot = self.function.new_slot(ty, None);
                     self.slots.insert(id, slot);
+                    // A field the arm's pattern binds starts as the message's.
+                    if let (
+                        Role::Handler { bindings, .. },
+                        Some(hir::analysis::ty::ty_check::LocalBinding::Local { pat, .. }),
+                    ) = (&self.role, binding)
+                        && let Some((_, param)) = bindings.iter().find(|(bound, _)| bound == pat)
+                        && let Some(value) = self.function.params.get(*param).copied()
+                    {
+                        self.push(
+                            StmtKind::Store {
+                                slot,
+                                path: Vec::new(),
+                                value,
+                            },
+                            span,
+                        );
+                    }
                 }
                 NRootKind::ParamPlace { param } => {
                     let span = self.span(root.origin);
@@ -400,29 +584,14 @@ impl<'db> BodyLowering<'_, 'db> {
                         continue;
                     };
                     let span = self.span(root.origin);
-                    let ty = self.ty(binding.effective_target_ty(), &span)?;
-                    let state = self.state.ok_or_else(|| {
-                        self.unsupported(&span, "contract storage outside the contract")
-                    })?;
-                    let slot = self.function.new_slot(ty.clone(), None);
+                    let slot =
+                        self.storage
+                            .get(field.index as usize)
+                            .copied()
+                            .ok_or_else(|| {
+                                self.unsupported(&span, "contract storage outside the contract")
+                            })?;
                     self.slots.insert(id, slot);
-                    self.storage.push((field.index, slot));
-                    let value = self.fresh(
-                        ty,
-                        Expr::Project {
-                            value: state,
-                            path: vec![Proj::Field(field.index as u16)],
-                        },
-                        span.clone(),
-                    );
-                    self.push(
-                        StmtKind::Store {
-                            slot,
-                            path: Vec::new(),
-                            value,
-                        },
-                        span,
-                    );
                 }
             }
         }
@@ -442,6 +611,13 @@ impl<'db> BodyLowering<'_, 'db> {
     }
 
     fn operand(&mut self, operand: &NOperand) -> Lowering<ValueId> {
+        // A borrow reads what its place holds now, which writes through it
+        // may have changed.
+        if let Some((slot, path)) = self.borrows.get(&operand.value).cloned() {
+            let id = self.value(operand.value)?;
+            let ty = self.function.ty(id).clone();
+            return Ok(self.fresh(ty, Expr::Load { slot, path }, Span::default()));
+        }
         self.value(operand.value)
     }
 
@@ -474,25 +650,13 @@ impl<'db> BodyLowering<'_, 'db> {
             NStatementKind::Define { result, expr } => self.define_expr(*result, expr, span),
             NStatementKind::Store { destination, value } => {
                 let value = self.operand(value)?;
-                match self.base(destination, &span)? {
-                    Base::Slot(slot) => {
-                        if matches!(self.role, Role::Function)
-                            && self.storage.iter().any(|(_, held)| *held == slot)
-                        {
-                            return Err(self.unsupported(
-                                &span,
-                                "writing contract storage outside a contract's `init` and \
-                                 `recv` arms is not supported yet",
-                            ));
-                        }
-                        let path = self.path(destination.path.as_slice(), &span)?;
+                match self.locate(destination, &span)? {
+                    Location::Slot(slot, path) => {
                         self.push(StmtKind::Store { slot, path, value }, span);
                         Ok(())
                     }
-                    Base::Value(_) => {
-                        Err(self
-                            .unsupported(&span, "writing through a borrow is not supported yet"))
-                    }
+                    Location::Value(..) => Err(self
+                        .unsupported(&span, "writing through a borrow of a value without a place")),
                 }
             }
             NStatementKind::CheckIndex { index, array } => {
@@ -559,7 +723,7 @@ impl<'db> BodyLowering<'_, 'db> {
         }
     }
 
-    fn path(&mut self, path: &[NDataProjection], span: &Span) -> Lowering<Vec<Proj>> {
+    fn path(&mut self, path: &[NDataProjection], _span: &Span) -> Lowering<Vec<Proj>> {
         path.iter()
             .map(|projection| {
                 Ok(match projection {
@@ -574,9 +738,7 @@ impl<'db> BodyLowering<'_, 'db> {
                     NDataProjection::Index(NIndex::Value(value)) => {
                         Proj::Index(Index::Value(self.value(*value)?))
                     }
-                    NDataProjection::Entry(_) => {
-                        return Err(self.unsupported(span, "keyed collections are not supported"));
-                    }
+                    NDataProjection::Entry(key) => Proj::Index(Index::Value(self.value(*key)?)),
                 })
             })
             .collect()
@@ -584,16 +746,35 @@ impl<'db> BodyLowering<'_, 'db> {
 
     /// The value at a place, read now.
     fn read(&mut self, place: &NPlace<'db>, span: &Span) -> Lowering<Expr> {
+        Ok(match self.locate(place, span)? {
+            Location::Slot(slot, path) => Expr::Load { slot, path },
+            Location::Value(value, path) if path.is_empty() => Expr::Use(value),
+            Location::Value(value, path) => Expr::Project { value, path },
+        })
+    }
+
+    /// Where a place is, through the borrows the body holds.
+    fn locate(&mut self, place: &NPlace<'db>, span: &Span) -> Lowering<Location> {
         let path = self.path(place.path.as_slice(), span)?;
+        if let NPlaceBase::CapabilityTarget { carrier } = place.base
+            && let Some((slot, mut prefix)) = self.borrows.get(&carrier).cloned()
+        {
+            prefix.extend(path);
+            return Ok(Location::Slot(slot, prefix));
+        }
         Ok(match self.base(place, span)? {
-            Base::Slot(slot) => Expr::Load { slot, path },
-            Base::Value(value) if path.is_empty() => Expr::Use(value),
-            Base::Value(value) => Expr::Project { value, path },
+            Base::Slot(slot) => Location::Slot(slot, path),
+            Base::Value(value) => Location::Value(value, path),
         })
     }
 
     fn define_expr(&mut self, result: NValueId, expr: &NExpr<'db>, span: Span) -> Lowering<()> {
         let lowered = match expr {
+            NExpr::Forward { src } if self.borrows.contains_key(&src.value) => {
+                let target = self.borrows[&src.value].clone();
+                self.borrows.insert(result, target);
+                Expr::Use(self.operand(src)?)
+            }
             NExpr::Forward { src } => Expr::Use(self.operand(src)?),
             NExpr::ProjectValue { value, path } => Expr::Project {
                 value: self.operand(value)?,
@@ -603,9 +784,17 @@ impl<'db> BodyLowering<'_, 'db> {
             NExpr::Borrow { place, kind, .. } => match kind {
                 BorrowKind::Ref => self.read(place, &span)?,
                 BorrowKind::Mut if is_evm(self.lx.db, place.ty) => self.read(place, &span)?,
-                BorrowKind::Mut => {
-                    return Err(self.unsupported(&span, "mutable borrows are not supported yet"));
-                }
+                BorrowKind::Mut => match self.locate(place, &span)? {
+                    Location::Slot(slot, path) => {
+                        self.borrows.insert(result, (slot, path.clone()));
+                        Expr::Load { slot, path }
+                    }
+                    Location::Value(..) => {
+                        return Err(
+                            self.unsupported(&span, "a mutable borrow of a value without a place")
+                        );
+                    }
+                },
             },
             NExpr::Const(constant) => {
                 let dst = self.value(result)?;
@@ -668,12 +857,13 @@ impl<'db> BodyLowering<'_, 'db> {
                 effect_args,
                 ..
             } => {
+                let operands = args.clone();
                 let args = args
                     .iter()
                     .map(|arg| self.operand(arg))
                     .collect::<Lowering<Vec<_>>>()?;
                 let instance = SemanticInstance::new(self.lx.db, callee.key);
-                return self.call(result, instance, args, effect_args, span);
+                return self.call(result, instance, args, &operands, effect_args, span);
             }
             NExpr::StructuralRepack { .. } => {
                 return Err(self.unsupported(&span, "structural repacking is not supported yet"));
@@ -697,6 +887,7 @@ impl<'db> BodyLowering<'_, 'db> {
         result: NValueId,
         instance: SemanticInstance<'db>,
         mut args: Vec<ValueId>,
+        operands: &[NOperand],
         effect_args: &[NEffectArg<'db>],
         span: Span,
     ) -> Lowering<()> {
@@ -789,7 +980,9 @@ impl<'db> BodyLowering<'_, 'db> {
             return Ok(());
         }
         let callee = self.lx.function(instance)?;
+        let mut callee_shape = Shape::default();
         if let Ok(artifacts) = normalize_semantic_body(db, instance) {
+            callee_shape = shape(db, instance, &artifacts.body);
             let hidden = hidden(&artifacts.body);
             if hidden.env {
                 let env = self.env.ok_or_else(|| {
@@ -818,7 +1011,87 @@ impl<'db> BodyLowering<'_, 'db> {
                 args.push(value);
             }
         }
-        self.define(dst, Expr::Call { func: callee, args }, span);
+        if callee_shape.is_plain() {
+            self.define(dst, Expr::Call { func: callee, args }, span);
+            return Ok(());
+        }
+        // The callee returns its result, then what it leaves in each place
+        // it was lent, which goes back where it came from.
+        let returned = self.lx.program.function(callee).result.clone();
+        let Type::Tuple(parts) = &returned else {
+            return Err(self.unsupported(&span, format!("`{name}` returns what it borrowed oddly")));
+        };
+        let parts = parts.clone();
+        let tuple = self.fresh(returned, Expr::Call { func: callee, args }, span.clone());
+        self.define(
+            dst,
+            Expr::Project {
+                value: tuple,
+                path: vec![Proj::Field(0)],
+            },
+            span.clone(),
+        );
+        for (position, index) in callee_shape.mutable.iter().enumerate() {
+            let lent = operands
+                .get(*index)
+                .and_then(|operand| self.borrows.get(&operand.value).cloned())
+                .ok_or_else(|| {
+                    self.unsupported(
+                        &span,
+                        format!(
+                            "a mutable borrow passed to `{name}` from where it cannot be traced"
+                        ),
+                    )
+                })?;
+            let back = self.fresh(
+                parts[position + 1].clone(),
+                Expr::Project {
+                    value: tuple,
+                    path: vec![Proj::Field(position as u16 + 1)],
+                },
+                span.clone(),
+            );
+            self.push(
+                StmtKind::Store {
+                    slot: lent.0,
+                    path: lent.1,
+                    value: back,
+                },
+                span.clone(),
+            );
+        }
+        if callee_shape.writes_state {
+            let last = parts.len() - 1;
+            let state = self.fresh(
+                parts[last].clone(),
+                Expr::Project {
+                    value: tuple,
+                    path: vec![Proj::Field(last as u16)],
+                },
+                span.clone(),
+            );
+            let Type::Tuple(fields) = parts[last].clone() else {
+                return Err(self.unsupported(&span, "storage that is not a tuple of fields"));
+            };
+            for (index, (slot, ty)) in self.storage.clone().into_iter().zip(fields).enumerate() {
+                let value = self.fresh(
+                    ty,
+                    Expr::Project {
+                        value: state,
+                        path: vec![Proj::Field(index as u16)],
+                    },
+                    span.clone(),
+                );
+                self.push(
+                    StmtKind::Store {
+                        slot,
+                        path: Vec::new(),
+                        value,
+                    },
+                    span.clone(),
+                );
+            }
+        }
         Ok(())
     }
 
@@ -867,6 +1140,17 @@ impl<'db> BodyLowering<'_, 'db> {
             NTerminatorKind::Unreachable => Terminator::Unreachable,
             NTerminatorKind::Return(_) if matches!(self.role, Role::Handler { .. }) => {
                 Terminator::Return(self.current_state(span)?)
+            }
+            NTerminatorKind::Return(value) if !self.shape.is_plain() => {
+                let value = match value {
+                    Some(value) => self.operand(value)?,
+                    None => self.fresh(Type::Unit, Expr::Const(Const::Unit), span.clone()),
+                };
+                Terminator::Return(self.with_lent(value, span)?)
+            }
+            NTerminatorKind::Yield { value, .. } if !self.shape.is_plain() => {
+                let value = self.operand(value)?;
+                Terminator::Return(self.with_lent(value, span)?)
             }
             NTerminatorKind::Return(Some(value)) | NTerminatorKind::Yield { value, .. } => {
                 Terminator::Return(self.operand(value)?)

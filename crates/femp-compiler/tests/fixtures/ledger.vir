@@ -252,10 +252,10 @@ bb0:
 
 f14 Ledger::Deposit(v0 storage: (LedgerStore), v1 ctx.timestamp: u256, v2 amount: u64) -> (LedgerStore)  @src/lib.fe:30
 bb0:
-  v3: u256 = havoc  @src/lib.fe:30
+  v3: u256 = cast v1 to u256  @src/lib.fe:30
   v4: u256 = havoc  @src/lib.fe:30
-  v5: u256 = 0  @src/lib.fe:30
-  v6: u256 = havoc  @src/lib.fe:30
+  v5: u256 = havoc  @src/lib.fe:30
+  v6: u256 = 0  @src/lib.fe:30
   v7: u256 = havoc  @src/lib.fe:30
   v8: u256 = havoc  @src/lib.fe:30
   v9: u256 = havoc  @src/lib.fe:30
@@ -265,9 +265,10 @@ bb0:
   v13: u256 = havoc  @src/lib.fe:30
   v14: u256 = havoc  @src/lib.fe:30
   v15: u256 = havoc  @src/lib.fe:30
-  v16: Evm = make Evm {v1, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15}  @src/lib.fe:30
-  v17: (LedgerStore) = call f1(v2, v16, v0)  @src/lib.fe:30
-  return v17  @src/lib.fe:30
+  v16: u256 = havoc  @src/lib.fe:30
+  v17: Evm = make Evm {v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16}  @src/lib.fe:30
+  v18: (LedgerStore) = call f1(v2, v17, v0)  @src/lib.fe:30
+  return v18  @src/lib.fe:30
 
 f15 Ledger::Move(v0 storage: (LedgerStore), v1 amount: u64, v2 back: bool) -> (LedgerStore)  @src/lib.fe:40
 bb0:

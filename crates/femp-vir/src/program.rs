@@ -484,6 +484,10 @@ pub enum Expr {
         value: ValueId,
         len: usize,
     },
+    /// A map whose every entry is `value`.
+    Fill {
+        value: ValueId,
+    },
     Call {
         func: FuncId,
         args: Vec<ValueId>,

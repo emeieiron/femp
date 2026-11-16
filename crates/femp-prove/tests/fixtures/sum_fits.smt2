@@ -1,5 +1,6 @@
 (set-option :produce-models true)
-(declare-datatypes ((Unit 0) (T0 0)) (((Unit.mk)) ((T0.mk (T0.0 Int) (T0.1 Int)))))
+(declare-datatypes ((Unit 0)) (((Unit.mk))))
+(declare-datatypes ((T0 0)) (((T0.mk (T0.0 Int) (T0.1 Int)))))
 (define-fun wf.u8 ((x Int)) Bool (and (<= 0 x) (<= x 255)))
 (define-fun wf.T0 ((x T0)) Bool (and (wf.u8 (T0.0 x)) (wf.u8 (T0.1 x))))
 (define-fun tdiv ((a Int) (b Int)) Int (ite (>= a 0) (ite (>= b 0) (div a b) (- (div a (- b)))) (ite (>= b 0) (- (div (- a) b)) (div (- a) (- b)))))

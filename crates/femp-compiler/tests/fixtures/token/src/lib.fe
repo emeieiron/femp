@@ -1,0 +1,76 @@
+use std::evm::{Address, Ctx, StorageMap, revert_error}
+
+msg TokenMsg {
+    #[selector = sol("mint(address,uint256)")]
+    Mint { to: Address, amount: u256 } -> bool,
+    #[selector = sol("transfer(address,uint256)")]
+    Transfer { to: Address, amount: u256 } -> bool,
+    #[selector = sol("balanceOf(address)")]
+    BalanceOf { account: Address } -> u256,
+}
+
+#[error]
+pub struct NotOwner {}
+
+#[error]
+pub struct OverCap { pub amount: u256 }
+
+const CAP: u256 = 1_000_000
+
+pub struct TokenStore {
+    pub owner: Address,
+    pub supply: u256,
+    pub balances: StorageMap<Address, u256>,
+}
+
+pub contract Token uses (ctx: Ctx) {
+    mut store: TokenStore,
+
+    init() uses (mut store, ctx) { store.owner = ctx.caller() }
+
+    recv TokenMsg {
+        Mint { to, amount } -> bool uses (mut store, ctx) {
+            if ctx.caller() != store.owner {
+                revert_error(NotOwner {})
+            }
+            let held = store.balances.get(key: to)
+            if amount > CAP - held {
+                revert_error(OverCap { amount })
+            }
+            store.balances.set(key: to, value: held + amount)
+            store.supply = store.supply + amount
+            true
+        }
+
+        Transfer { to, amount } -> bool uses (mut store, ctx) {
+            let from = ctx.caller()
+            let held = store.balances.get(key: from)
+            if held < amount {
+                return false
+            }
+            store.balances.set(key: from, value: held - amount)
+            let target = store.balances.get(key: to)
+            if amount > CAP - target {
+                revert_error(OverCap { amount })
+            }
+            store.balances.set(key: to, value: target + amount)
+            true
+        }
+
+        BalanceOf { account } -> u256 uses (store) {
+            store.balances.get(key: account)
+        }
+    }
+}
+
+/// No account ever holds more than the cap.
+#[invariant]
+fn balances_stay_under_the_cap(store: TokenStore, account: Address) -> bool {
+    store.balances.get(key: account) <= CAP
+}
+
+/// False: the owner can mint more than this.
+#[invariant]
+fn supply_stays_small(store: TokenStore) -> bool {
+    store.supply <= 1000
+}

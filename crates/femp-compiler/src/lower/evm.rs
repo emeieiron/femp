@@ -110,6 +110,16 @@ fn std_path(db: &DriverDataBase, func: Func<'_>) -> Option<String> {
 /// Whether `ty` is `std::evm::Evm`, the capability a contract's code runs
 /// with.
 pub fn is_evm(db: &dyn hir::analysis::HirAnalysisDb, ty: TyId<'_>) -> bool {
+    is_std_struct(db, ty, "Evm")
+}
+
+/// Whether `ty` is a `std::evm::StorageMap`, whose entries are all zero
+/// until they are written.
+pub fn is_storage_map(db: &dyn hir::analysis::HirAnalysisDb, ty: TyId<'_>) -> bool {
+    is_std_struct(db, ty, "StorageMap")
+}
+
+fn is_std_struct(db: &dyn hir::analysis::HirAnalysisDb, ty: TyId<'_>, wanted: &str) -> bool {
     let Some(def) = ty.adt_def(db) else {
         return false;
     };
@@ -117,5 +127,5 @@ pub fn is_evm(db: &dyn hir::analysis::HirAnalysisDb, ty: TyId<'_>) -> bool {
         return false;
     };
     item.top_mod(db).ingot(db).kind(db) == IngotKind::Std
-        && matches!(item.name(db), Partial::Present(name) if name.data(db) == "Evm")
+        && matches!(item.name(db), Partial::Present(name) if name.data(db) == wanted)
 }

@@ -43,8 +43,9 @@ pub struct LoweredContract {
     pub init: Handler,
     /// From the storage, the context and a message to the next storage.
     pub arms: Vec<Handler>,
-    /// Each invariant as a function of the storage.
-    pub invariants: Vec<FuncId>,
+    /// Each invariant as a function of the storage and of what else it
+    /// ranges over.
+    pub invariants: Vec<Invariant>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,11 +62,37 @@ pub struct Handler {
     pub selector: Option<u32>,
 }
 
+/// A value the solver chooses for a handler or an invariant: what the
+/// counterexample shows, and the Fe value it stands for. An `Address` is
+/// chosen as the 160-bit number it holds.
+#[derive(Debug, Clone)]
+struct Input {
+    param: Param,
+    ty: Type,
+}
+
+/// An invariant of a contract, as a function of its storage and of the
+/// values its other parameters range over.
+#[derive(Debug, Clone)]
+pub struct Invariant {
+    pub func: FuncId,
+    /// The parameters that are not fields: the invariant holds for every
+    /// value of them.
+    pub params: Vec<Param>,
+}
+
+/// Where an invariant's parameter comes from.
+#[derive(Debug, Clone)]
+enum Source {
+    Field(usize),
+    Every(Input),
+}
+
 /// A handler lowered, before it is wrapped.
 struct Pending {
     name: String,
     func: FuncId,
-    params: Vec<Param>,
+    params: Vec<Input>,
     payable: bool,
     selector: Option<u32>,
 }
@@ -76,8 +103,8 @@ pub(super) struct Lowering {
     fields: Vec<String>,
     init: Option<Pending>,
     arms: Vec<Pending>,
-    /// Each invariant and the storage field of each of its parameters.
-    invariants: Vec<(FuncId, Vec<usize>)>,
+    /// Each invariant and where each of its parameters comes from.
+    invariants: Vec<(FuncId, Vec<Source>)>,
     name: String,
 }
 
@@ -102,8 +129,13 @@ impl<'db> Lowerer<'db> {
                 let instance = instance(db, owner, &span)?;
                 let state = self.state_type(contract, instance, &span)?;
                 let params = self.init_params(instance, init, &span)?;
-                let func =
-                    self.handler(instance, format!("{}::init", root.name), &params, state)?;
+                let func = self.handler(
+                    instance,
+                    format!("{}::init", root.name),
+                    &params,
+                    state,
+                    Vec::new(),
+                )?;
                 Some(Pending {
                     name: "init".to_string(),
                     func,
@@ -127,8 +159,14 @@ impl<'db> Lowerer<'db> {
                 let instance = instance(db, owner, &span)?;
                 let state = self.state_type(contract, instance, &span)?;
                 let (name, params) = self.message(instance, arm, &span)?;
-                let func =
-                    self.handler(instance, format!("{}::{name}", root.name), &params, state)?;
+                let bindings = arm_bindings(db, arm, &params);
+                let func = self.handler(
+                    instance,
+                    format!("{}::{name}", root.name),
+                    &params,
+                    state,
+                    bindings,
+                )?;
                 arms.push(Pending {
                     name,
                     func,
@@ -148,31 +186,24 @@ impl<'db> Lowerer<'db> {
             let func = self.find_root(invariant)?;
             let id = self.root(func)?;
             self.check_reachable(id)?;
-            let mut indexes = Vec::new();
-            let function = self.program.function(id);
+            let mut sources = Vec::new();
+            let function = self.program.function(id).clone();
             for (param, name) in function.params.iter().zip(param_names(db, func)) {
-                let field = names
-                    .iter()
-                    .position(|field| *field == name)
-                    .ok_or_else(|| {
-                        Unsupported::new(
-                            function.span.clone(),
-                            format!(
-                                "`{}` has a parameter `{name}`, but `{}` has no field of that name",
-                                invariant.name, root.name
-                            ),
-                        )
-                    })?;
+                let ty = function.ty(*param).clone();
+                let Some(field) = names.iter().position(|field| *field == name) else {
+                    sources.push(Source::Every(self.input(name, &ty, &function.span)?));
+                    continue;
+                };
                 let Type::Tuple(types) = &state else {
                     unreachable!("the storage is a tuple");
                 };
-                if function.ty(*param) != &types[field] {
+                if ty != types[field] {
                     return Err(Unsupported::new(
                         function.span.clone(),
                         format!("the parameter `{name}` must have the type of the field `{name}`"),
                     ));
                 }
-                indexes.push(field);
+                sources.push(Source::Field(field));
             }
             if function.result != Type::Bool {
                 return Err(Unsupported::new(
@@ -180,7 +211,7 @@ impl<'db> Lowerer<'db> {
                     "an `#[invariant]` must return `bool`",
                 ));
             }
-            invariants.push((id, indexes));
+            invariants.push((id, sources));
         }
         Ok(Lowering {
             state,
@@ -211,8 +242,9 @@ impl<'db> Lowerer<'db> {
         &mut self,
         instance: SemanticInstance<'db>,
         name: String,
-        params: &[Param],
+        params: &[Input],
         state: Type,
+        bindings: Vec<(hir::hir_def::PatId, usize)>,
     ) -> Result<FuncId, Unsupported> {
         let owner = instance.key(self.db).owner(self.db);
         let id = self.program.push(Function::new(
@@ -222,8 +254,9 @@ impl<'db> Lowerer<'db> {
         ));
         self.functions.insert(instance, id);
         let role = Role::Handler {
-            params: params.iter().map(|param| vir_type(param.ty)).collect(),
+            params: params.iter().map(|input| input.ty.clone()).collect(),
             state,
+            bindings,
         };
         match super::body::lower(self, instance, name, role) {
             Ok(function) => *self.program.function_mut(id) = function,
@@ -241,7 +274,7 @@ impl<'db> Lowerer<'db> {
         instance: SemanticInstance<'db>,
         init: hir::hir_def::ContractInit<'db>,
         span: &Span,
-    ) -> Result<Vec<Param>, Unsupported> {
+    ) -> Result<Vec<Input>, Unsupported> {
         let db = self.db;
         let names: Vec<String> = init
             .params(db)
@@ -273,7 +306,7 @@ impl<'db> Lowerer<'db> {
                 .types
                 .lower(db, instance, value.ty)
                 .map_err(|message| Unsupported::new(span.clone(), message))?;
-            params.push(param(name, &ty, span)?);
+            params.push(self.input(name, &ty, span)?);
         }
         Ok(params)
     }
@@ -284,7 +317,7 @@ impl<'db> Lowerer<'db> {
         instance: SemanticInstance<'db>,
         arm: hir::semantic::RecvArmView<'db>,
         span: &Span,
-    ) -> Result<(String, Vec<Param>), Unsupported> {
+    ) -> Result<(String, Vec<Input>), Unsupported> {
         let db = self.db;
         if arm.is_fallback(db) {
             return Ok(("fallback".to_string(), Vec::new()));
@@ -321,10 +354,32 @@ impl<'db> Lowerer<'db> {
                 .types
                 .lower(db, instance, *ty)
                 .map_err(|message| Unsupported::new(span.clone(), message))?;
-            params.push(param(field, &ty, span)?);
+            params.push(self.input(field, &ty, span)?);
         }
         Ok((name, params))
     }
+}
+
+/// The pattern of each message field an arm binds, with the field's index.
+fn arm_bindings<'db>(
+    db: &'db driver::DriverDataBase,
+    arm: hir::semantic::RecvArmView<'db>,
+    params: &[Input],
+) -> Vec<(hir::hir_def::PatId, usize)> {
+    let Some(arm) = arm.arm(db) else {
+        return Vec::new();
+    };
+    let Partial::Present(hir::hir_def::Pat::Record(_, fields)) = arm.pat.data(db, arm.body) else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter_map(|field| {
+            let label = field.label(db, arm.body)?.data(db).to_string();
+            let index = params.iter().position(|input| input.param.name == label)?;
+            Some((field.pat, index))
+        })
+        .collect()
 }
 
 fn instance<'db>(
@@ -348,31 +403,78 @@ fn param_names<'db>(db: &'db driver::DriverDataBase, func: hir::hir_def::Func<'d
         .collect()
 }
 
-fn param(name: String, ty: &Type, span: &Span) -> Result<Param, Unsupported> {
-    let ty = match ty {
-        Type::Bool => Ty::Bool,
-        Type::Int {
-            bits,
-            signed: false,
-        } => Ty::Uint(*bits),
-        Type::Int { bits, signed: true } => Ty::Int(*bits),
-        _ => {
-            return Err(Unsupported::new(
-                span.clone(),
-                format!(
-                    "`{name}` is not an integer or `bool`, which is all a contract's messages \
-                     may carry for now"
-                ),
-            ));
-        }
-    };
-    Ok(Param {
-        name,
-        label: None,
-        ty,
-        generator: "any".to_string(),
-    })
+impl Lowerer<'_> {
+    /// What the solver chooses for a value of `ty`: an integer or a `bool`,
+    /// or the number an `Address` holds.
+    fn input(&self, name: String, ty: &Type, span: &Span) -> Result<Input, Unsupported> {
+        let chosen = match ty {
+            Type::Bool => Ty::Bool,
+            Type::Int {
+                bits,
+                signed: false,
+            } => Ty::Uint(*bits),
+            Type::Int { bits, signed: true } => Ty::Int(*bits),
+            _ if is_address(&self.types.table, ty) => Ty::Uint(160),
+            _ => {
+                return Err(Unsupported::new(
+                    span.clone(),
+                    format!(
+                        "`{name}` is not an integer, a `bool` or an `Address`, which is all a \
+                         contract's messages and invariants may range over for now"
+                    ),
+                ));
+            }
+        };
+        Ok(Input {
+            param: Param {
+                name,
+                label: None,
+                ty: chosen,
+                generator: "any".to_string(),
+            },
+            ty: ty.clone(),
+        })
+    }
 }
+
+/// Whether `ty` is `std::evm::Address`: a struct of one `u256`.
+fn is_address(table: &TypeTable, ty: &Type) -> bool {
+    let Type::Adt(id) = ty else {
+        return false;
+    };
+    matches!(table.get(*id), TypeDef::Struct { name, fields }
+        if name.rsplit("::").next() == Some("Address")
+            && matches!(fields.as_slice(), [field] if field.ty == Type::uint(256)))
+}
+
+/// The Fe value an input stands for, from the value the solver chose.
+fn value_of(
+    cursor: &mut Cursor<'_>,
+    input: &Input,
+    chosen: femp_vir::ValueId,
+) -> femp_vir::ValueId {
+    if input.ty == vir_type(input.param.ty) {
+        return chosen;
+    }
+    let inner = cursor.def(
+        Type::uint(256),
+        Expr::Cast {
+            value: chosen,
+            to: Type::uint(256),
+        },
+    );
+    cursor.def(
+        input.ty.clone(),
+        Expr::Make {
+            ty: input.ty.clone(),
+            fields: vec![inner],
+        },
+    )
+}
+
+/// The context fields that hold an address, which the solver chooses as
+/// 160-bit numbers.
+const ADDRESSES: [&str; 4] = ["ctx.caller", "ctx.origin", "ctx.address", "ctx.coinbase"];
 
 fn vir_type(ty: Ty) -> Type {
     match ty {
@@ -417,7 +519,7 @@ impl Lowering {
         let invariants = self
             .invariants
             .iter()
-            .map(|(func, fields)| {
+            .map(|(func, sources)| {
                 let name = lx.program.function(*func).name.clone();
                 let mut function = Function::new(
                     format!("{}::{name}", self.name),
@@ -426,26 +528,43 @@ impl Lowering {
                 );
                 let storage = function.new_value(self.state.clone(), Some("storage".to_string()));
                 function.params.push(storage);
+                let mut every = Vec::new();
+                for source in sources {
+                    if let Source::Every(input) = source {
+                        let value = function
+                            .new_value(vir_type(input.param.ty), Some(input.param.name.clone()));
+                        function.params.push(value);
+                        every.push((input.clone(), value));
+                    }
+                }
                 let block = function.entry;
                 let mut cursor = Cursor::new(&mut function, block);
                 let Type::Tuple(types) = &self.state else {
                     unreachable!("the storage is a tuple");
                 };
-                let args = fields
+                let mut every_values = every.iter();
+                let args = sources
                     .iter()
-                    .map(|field| {
-                        cursor.def(
+                    .map(|source| match source {
+                        Source::Field(field) => cursor.def(
                             types[*field].clone(),
                             Expr::Project {
                                 value: storage,
                                 path: vec![Proj::Field(*field as u16)],
                             },
-                        )
+                        ),
+                        Source::Every(_) => {
+                            let (input, chosen) = every_values.next().expect("one per source");
+                            value_of(&mut cursor, input, *chosen)
+                        }
                     })
                     .collect();
                 let holds = cursor.call(*func, args, Type::Bool);
                 cursor.terminate(femp_vir::Terminator::Return(holds));
-                lx.program.push(function)
+                Invariant {
+                    func: lx.program.push(function),
+                    params: every.into_iter().map(|(input, _)| input.param).collect(),
+                }
             })
             .collect();
         LoweredContract {
@@ -485,25 +604,49 @@ fn wrap_handler(
     let mut context_values = Vec::new();
     for field in &context {
         let name = CONTEXT[*field].1.to_string();
-        let value = function.new_value(Type::uint(256), Some(name.clone()));
+        let ty = if ADDRESSES.contains(&name.as_str()) {
+            Ty::Uint(160)
+        } else {
+            Ty::Uint(256)
+        };
+        let value = function.new_value(vir_type(ty), Some(name.clone()));
         function.params.push(value);
         context_values.push((*field, value));
         params.push(Param {
             name,
             label: None,
-            ty: Ty::Uint(256),
+            ty,
             generator: "any".to_string(),
         });
     }
-    let mut message = Vec::new();
-    for param in &pending.params {
-        let value = function.new_value(vir_type(param.ty), Some(param.name.clone()));
+    let mut chosen = Vec::new();
+    for input in &pending.params {
+        let value = function.new_value(vir_type(input.param.ty), Some(input.param.name.clone()));
         function.params.push(value);
-        message.push(value);
-        params.push(param.clone());
+        chosen.push(value);
+        params.push(input.param.clone());
     }
     let block = function.entry;
     let mut cursor = Cursor::new(&mut function, block);
+    let message: Vec<femp_vir::ValueId> = pending
+        .params
+        .iter()
+        .zip(chosen)
+        .map(|(input, value)| value_of(&mut cursor, input, value))
+        .collect();
+    let context_values: Vec<(usize, femp_vir::ValueId)> = context_values
+        .into_iter()
+        .map(|(field, value)| {
+            let widened = cursor.def(
+                Type::uint(256),
+                Expr::Cast {
+                    value,
+                    to: Type::uint(256),
+                },
+            );
+            (field, widened)
+        })
+        .collect();
     let fields = (0..CONTEXT.len())
         .map(
             |field| match context_values.iter().find(|(read, _)| *read == field) {
@@ -600,6 +743,10 @@ fn zero(cursor: &mut Cursor<'_>, table: &TypeTable, ty: &Type) -> femp_vir::Valu
         Type::Array { elem, len } => {
             let value = zero(cursor, table, elem);
             cursor.def(ty.clone(), Expr::Repeat { value, len: *len })
+        }
+        Type::Map { value, .. } => {
+            let value = zero(cursor, table, value);
+            cursor.def(ty.clone(), Expr::Fill { value })
         }
         Type::Adt(id) => match table.get(*id) {
             TypeDef::Struct { fields, .. } => {
