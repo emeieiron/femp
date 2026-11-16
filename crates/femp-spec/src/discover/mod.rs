@@ -1,7 +1,8 @@
 //! Finds the claims of a module by reading its Fe sources: `#[property]`
 //! and `#[differential]` functions, `#[machine]` structs with their
-//! `#[init]`, `#[command]`, `#[invariant]` and `#[observe]` methods, and
-//! `#[spec]` functions. Attribute arguments carry the generator
+//! `#[init]`, `#[command]`, `#[invariant]` and `#[observe]` methods,
+//! `#[spec]` functions, and free `#[invariant]` functions of a contract's
+//! storage. Attribute arguments carry the generator
 //! specifications and limits, so a claim is declared in one place.
 
 mod contracts;
@@ -20,9 +21,9 @@ use femp_core::property::{
 };
 use femp_core::source_tree::ModuleTree;
 
-use crate::claims::{Claims, Contract};
+use crate::claims::{Claims, Contract, StorageClaim, StorageInvariant};
 use contracts::{Candidate, PendingSpec};
-use parse::{Attr, RawFn, RawModule, RawStruct};
+use parse::{Attr, RawContract, RawFn, RawModule, RawStruct};
 
 pub const DEFAULT_STEPS: &str = "1..=16";
 
@@ -65,6 +66,8 @@ pub fn discover(module: &Module) -> Result<Claims, Vec<DiscoveryError>> {
         specs: Vec::new(),
         candidates: Vec::new(),
         contracts: Vec::new(),
+        deployed: Vec::new(),
+        storage_invariants: Vec::new(),
     };
     for (path, file, source) in sources {
         let file = authored(module, &file);
@@ -73,11 +76,13 @@ pub fn discover(module: &Module) -> Result<Claims, Vec<DiscoveryError>> {
         }
     }
     builder.resolve_specs();
-    builder.check_names();
+    let storage = builder.resolve_storage();
+    builder.check_names(&storage);
     if builder.errors.is_empty() {
         Ok(Claims {
             suite: builder.suite,
             contracts: builder.contracts,
+            storage,
         })
     } else {
         Err(builder.errors)
@@ -116,6 +121,10 @@ struct Builder {
     /// Every function and method a spec may name as its target.
     candidates: Vec<Candidate>,
     contracts: Vec<Contract>,
+    /// Every `contract` declared, with its module path and file.
+    deployed: Vec<(RawContract, Vec<String>, PathBuf)>,
+    /// Free `#[invariant]` functions, with the contract they name if any.
+    storage_invariants: Vec<(StorageInvariant, Option<String>)>,
 }
 
 impl Builder {
@@ -131,7 +140,15 @@ impl Builder {
 
     fn module(&mut self, file: &Path, raw: &RawModule) {
         self.note_candidates(file, raw);
+        for contract in &raw.contracts {
+            self.deployed
+                .push((contract.clone(), raw.path.clone(), file.to_path_buf()));
+        }
         for function in &raw.fns {
+            if has(&function.attrs, "invariant") {
+                self.storage_invariant(file, &raw.path, function);
+                continue;
+            }
             for attr in &function.attrs {
                 if is_method_marker(&attr.name) {
                     self.error(
@@ -613,7 +630,93 @@ impl Builder {
         }
     }
 
-    fn check_names(&mut self) {
+    fn storage_invariant(&mut self, file: &Path, path: &[String], function: &RawFn) {
+        let options = self.options(file, &function.attrs, "invariant", &["contract"]);
+        if function.has_self
+            || function.generic
+            || function.result.as_deref() != Some("bool")
+            || !function.effects.is_empty()
+        {
+            self.error(
+                file,
+                function.line,
+                "an `#[invariant]` of a contract takes its fields by name and returns `bool`, \
+                 without `self`, type parameters or effects",
+            );
+            return;
+        }
+        self.storage_invariants.push((
+            StorageInvariant {
+                name: function.name.clone(),
+                path: path.to_vec(),
+                location: Location {
+                    file: file.to_path_buf(),
+                    line: function.line,
+                },
+            },
+            options.get("contract").cloned(),
+        ));
+    }
+
+    /// Groups the free invariants by the contract each describes: the one
+    /// it names, or the only contract of the module.
+    fn resolve_storage(&mut self) -> Vec<StorageClaim> {
+        let mut claims: Vec<StorageClaim> = Vec::new();
+        for (invariant, named) in std::mem::take(&mut self.storage_invariants) {
+            let candidates: Vec<&(RawContract, Vec<String>, PathBuf)> = self
+                .deployed
+                .iter()
+                .filter(|(contract, _, _)| named.as_ref().is_none_or(|name| *name == contract.name))
+                .collect();
+            let (contract, path, file) = match (candidates.as_slice(), &named) {
+                ([only], _) => (*only).clone(),
+                ([], Some(name)) => {
+                    let (file, line) = (invariant.location.file.clone(), invariant.location.line);
+                    self.error(
+                        &file,
+                        line,
+                        format!("there is no contract `{name}` in this module"),
+                    );
+                    continue;
+                }
+                ([], None) => {
+                    let (file, line) = (invariant.location.file.clone(), invariant.location.line);
+                    self.error(
+                        &file,
+                        line,
+                        "an `#[invariant]` outside a `#[machine]` describes a contract's \
+                         storage, but this module declares no contract",
+                    );
+                    continue;
+                }
+                (_, _) => {
+                    let (file, line) = (invariant.location.file.clone(), invariant.location.line);
+                    self.error(
+                        &file,
+                        line,
+                        "this module declares several contracts; name one with \
+                         `#[invariant(contract = \"Name\")]`",
+                    );
+                    continue;
+                }
+            };
+            match claims.iter_mut().find(|claim| claim.name == contract.name) {
+                Some(claim) => claim.invariants.push(invariant),
+                None => claims.push(StorageClaim {
+                    name: contract.name.clone(),
+                    path,
+                    invariants: vec![invariant],
+                    location: Location {
+                        file,
+                        line: contract.line,
+                    },
+                }),
+            }
+        }
+        claims
+    }
+
+    fn check_names(&mut self, storage: &[StorageClaim]) {
         let mut seen: BTreeMap<String, Location> = BTreeMap::new();
         let entries: Vec<(String, Location)> = self
             .suite
@@ -631,6 +734,7 @@ impl Builder {
                     .iter()
                     .map(|c| (c.name.clone(), c.location.clone())),
             )
+            .chain(storage.iter().map(|c| (c.name.clone(), c.location.clone())))
             .collect();
         for (name, location) in entries {
             if let Some(first) = seen.get(&name) {

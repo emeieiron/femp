@@ -431,3 +431,67 @@ fn spec_names_share_the_namespace_of_entry_points() {
     let errors = claims(&[("lib.fe", source)]).unwrap_err();
     assert!(errors[0].contains("must be unique"), "{errors:?}");
 }
+
+const LEDGER: &str = r#"
+msg LedgerMsg {
+    #[selector = sol("deposit(uint64)")]
+    Deposit { amount: u64 } -> u64,
+}
+
+pub struct LedgerStore { pub total: u64, pub cap: u64 }
+
+pub contract Ledger uses (ctx: Ctx) {
+    mut store: LedgerStore,
+
+    recv LedgerMsg {
+        Deposit { amount } -> u64 uses (mut store) {
+            store.total
+        }
+    }
+}
+
+#[invariant]
+fn within_cap(store: LedgerStore) -> bool {
+    store.total <= store.cap
+}
+
+#[invariant(contract = "Ledger")]
+fn cap_is_set(store: LedgerStore) -> bool {
+    true
+}
+"#;
+
+#[test]
+fn finds_the_invariants_of_a_contract() {
+    let claims = claims(&[("lib.fe", LEDGER)]).unwrap();
+    let [claim] = claims.storage.as_slice() else {
+        panic!("one contract, not {:?}", claims.storage);
+    };
+    assert_eq!(claim.name, "Ledger");
+    assert!(claim.path.is_empty());
+    assert_eq!(claim.location.line, 9);
+    let names: Vec<&str> = claim.invariants.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, ["within_cap", "cap_is_set"]);
+    assert!(claims.suite.machines.is_empty());
+}
+
+#[test]
+fn an_invariant_needs_its_contract() {
+    let lone = "#[invariant]\nfn holds(store: u64) -> bool { true }\n";
+    let errors = claims(&[("lib.fe", lone)]).unwrap_err();
+    assert!(errors[0].contains("declares no contract"), "{errors:?}");
+
+    let named = format!(
+        "{LEDGER}\n#[invariant(contract = \"Vault\")]\nfn other(store: LedgerStore) -> bool {{ true }}\n"
+    );
+    let errors = claims(&[("lib.fe", &named)]).unwrap_err();
+    assert!(errors[0].contains("no contract `Vault`"), "{errors:?}");
+
+    let two = format!("{LEDGER}\npub contract Vault {{}}\n");
+    let errors = claims(&[("lib.fe", &two)]).unwrap_err();
+    assert!(errors[0].contains("several contracts"), "{errors:?}");
+
+    let shaped = format!("{LEDGER}\n#[invariant]\nfn wrong(store: LedgerStore) -> u64 {{ 0 }}\n");
+    let errors = claims(&[("lib.fe", &shaped)]).unwrap_err();
+    assert!(errors[0].contains("returns `bool`"), "{errors:?}");
+}

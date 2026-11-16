@@ -22,6 +22,8 @@ pub enum PanicKind {
     Message(String),
     /// A Solidity panic code without a portable meaning.
     Code(u64),
+    /// A contract reverts its transaction on purpose.
+    Revert,
     Unknown,
 }
 
@@ -160,6 +162,7 @@ impl fmt::Display for PanicKind {
             Self::Explicit => f.write_str("explicit panic"),
             Self::Message(message) => write!(f, "{message:?}"),
             Self::Code(code) => write!(f, "panic code {code:#04x}"),
+            Self::Revert => f.write_str("revert"),
             Self::Unknown => f.write_str("reason not reported"),
         }
     }

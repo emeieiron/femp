@@ -8,6 +8,7 @@ pub mod fixtures;
 pub mod harness_ingot;
 pub mod outcome;
 pub mod suite;
+pub mod transactions;
 pub mod ty;
 pub mod value;
 
@@ -18,6 +19,7 @@ pub use outcome::{Outcome, PanicKind, Trap};
 pub use suite::{
     Command, Effect, Location, Machine, Method, Observation, Param, Property, PropertyKind, Suite,
 };
+pub use transactions::{Delivery, Transaction, Transactions};
 pub use ty::Ty;
 pub use value::Value;
 

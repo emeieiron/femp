@@ -1,11 +1,13 @@
 //! Cleans the entry up before encoding: drops blocks nothing reaches,
 //! forwards copies, removes block parameters every edge agrees on, merges
-//! straight-line chains, and deletes assertions of `true` and unused
-//! definitions. The task's inputs are kept, since their values are reported.
+//! straight-line chains, deletes assertions of `true` and unused
+//! definitions, and turns masks of low bits into remainders. The task's
+//! inputs are kept, since their values are reported.
 
 use std::collections::{HashMap, HashSet};
 
-use femp_vir::{BlockId, Const, Expr, Function, StmtKind, Terminator, ValueId};
+use femp_core::property::{Ty, U256, Value};
+use femp_vir::{Arith, BinOp, BlockId, Const, Expr, Function, Stmt, StmtKind, Terminator, ValueId};
 
 use super::Pass;
 use crate::task::{NotSupported, Task};
@@ -32,6 +34,8 @@ pub(crate) fn simplify(function: &mut Function, keep: &HashSet<ValueId>) {
         drop_agreeing_params(function);
         drop_unread_params(function);
         merge_chains(function);
+        fold_masks(function);
+        fold_constants(function);
         drop_trivial_checks(function);
         remove_unused(function, keep);
         if *function == before {
@@ -202,6 +206,155 @@ fn merge_chains(function: &mut Function) {
         // The emptied block is left without predecessors and removed later.
         function.block_mut(second).term = Terminator::Unreachable;
         function.rename_uses(&|value| renames.get(&value).copied().unwrap_or(value));
+    }
+}
+
+/// `x & m` of an unsigned `x` and a constant `m` of low bits is `x % (m + 1)`:
+/// the solver decides remainders by constants in integer arithmetic, where
+/// a bitwise `and` needs bit-vectors, which are slow for wide integers.
+fn fold_masks(function: &mut Function) {
+    let constants: HashMap<ValueId, Value> = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.stmts)
+        .filter_map(|stmt| match &stmt.kind {
+            StmtKind::Def {
+                dst,
+                expr: Expr::Const(Const::Int(value)),
+            } => Some((*dst, *value)),
+            _ => None,
+        })
+        .collect();
+    for block in 0..function.blocks.len() {
+        let mut stmts = Vec::new();
+        for stmt in std::mem::take(&mut function.blocks[block].stmts) {
+            let StmtKind::Def {
+                dst,
+                expr:
+                    Expr::Binary {
+                        op: BinOp::BitAnd,
+                        lhs,
+                        rhs,
+                    },
+            } = &stmt.kind
+            else {
+                stmts.push(stmt);
+                continue;
+            };
+            let ty = function.ty(*dst).clone();
+            let (mask, other) = match (constants.get(lhs), constants.get(rhs)) {
+                (_, Some(mask)) => (*mask, *lhs),
+                (Some(mask), None) => (*mask, *rhs),
+                (None, None) => {
+                    stmts.push(stmt);
+                    continue;
+                }
+            };
+            let Some((bits, false)) = ty.int_shape() else {
+                stmts.push(stmt);
+                continue;
+            };
+            let shape = Ty::Uint(bits);
+            let mask = mask.bits();
+            let expr = if mask.is_zero() {
+                Expr::Const(Const::Int(Value::from_ordinal(shape, U256::ZERO)))
+            } else if mask == shape.max_ordinal() {
+                Expr::Use(other)
+            } else if (mask + U256::from(1u8)).is_power_of_two() {
+                let divisor = function.new_value(ty.clone(), None);
+                stmts.push(Stmt {
+                    kind: StmtKind::Def {
+                        dst: divisor,
+                        expr: Expr::Const(Const::Int(Value::from_ordinal(
+                            shape,
+                            mask + U256::from(1u8),
+                        ))),
+                    },
+                    span: stmt.span.clone(),
+                });
+                Expr::Binary {
+                    op: BinOp::Rem(Arith::Exact),
+                    lhs: other,
+                    rhs: divisor,
+                }
+            } else {
+                stmts.push(stmt);
+                continue;
+            };
+            stmts.push(Stmt {
+                kind: StmtKind::Def { dst: *dst, expr },
+                span: stmt.span,
+            });
+        }
+        function.blocks[block].stmts = stmts;
+    }
+}
+
+/// Compares constants, and follows branches on a known condition, so that
+/// code no execution reaches is not encoded.
+fn fold_constants(function: &mut Function) {
+    let mut ints: HashMap<ValueId, Value> = HashMap::new();
+    let mut bools: HashMap<ValueId, bool> = HashMap::new();
+    for block in &function.blocks {
+        for stmt in &block.stmts {
+            if let StmtKind::Def {
+                dst,
+                expr: Expr::Const(constant),
+            } = &stmt.kind
+            {
+                match constant {
+                    Const::Int(value) => {
+                        ints.insert(*dst, *value);
+                    }
+                    Const::Bool(value) => {
+                        bools.insert(*dst, *value);
+                    }
+                    Const::Unit => {}
+                }
+            }
+        }
+    }
+    for block in &mut function.blocks {
+        for stmt in &mut block.stmts {
+            let StmtKind::Def {
+                dst,
+                expr: Expr::Binary { op, lhs, rhs },
+            } = &stmt.kind
+            else {
+                continue;
+            };
+            let (Some(a), Some(b)) = (ints.get(lhs), ints.get(rhs)) else {
+                continue;
+            };
+            let (a, b) = (a.ordinal(), b.ordinal());
+            let result = match op {
+                BinOp::Eq => a == b,
+                BinOp::Ne => a != b,
+                BinOp::Lt => a < b,
+                BinOp::Le => a <= b,
+                BinOp::Gt => a > b,
+                BinOp::Ge => a >= b,
+                _ => continue,
+            };
+            bools.insert(*dst, result);
+            stmt.kind = StmtKind::Def {
+                dst: *dst,
+                expr: Expr::Const(Const::Bool(result)),
+            };
+        }
+        if let Terminator::Branch {
+            cond,
+            then,
+            otherwise,
+        } = &block.term
+            && let Some(known) = bools.get(cond)
+        {
+            block.term = Terminator::Goto(if *known {
+                then.clone()
+            } else {
+                otherwise.clone()
+            });
+        }
     }
 }
 

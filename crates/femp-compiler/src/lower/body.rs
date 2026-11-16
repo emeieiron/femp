@@ -14,17 +14,20 @@ use femp_vir::{
     Terminator, Type, UnOp, ValueId,
 };
 use hir::analysis::semantic::{
-    BinaryOp, FailReason, NBlockId, NDataProjection, NExpr, NIndex, NOperand, NPlace, NPlaceBase,
-    NRootId, NRootKind, NStatement, NStatementKind, NSuccessor, NTerminatorKind, NValueDefinition,
-    NValueId, NormalizedBody, Overflow, SemanticInstance, UnaryOp, normalize_semantic_body,
+    BinaryOp, FailReason, NBlockId, NDataProjection, NEffectArg, NEffectArgValue, NExpr, NIndex,
+    NOperand, NPlace, NPlaceBase, NRootId, NRootKind, NStatement, NStatementKind, NSuccessor,
+    NTerminatorKind, NValueDefinition, NValueId, NormalizedBody, Overflow, SemanticInstance,
+    UnaryOp, normalize_semantic_body,
 };
 use hir::analysis::ty::ty_check::BodyOwner;
 use hir::analysis::ty::ty_def::BorrowKind;
+use hir::core::semantic::ProviderSource;
 use hir::hir_def::{CompBinOp, Partial};
 
 mod consts;
 
 use super::Lowerer;
+use super::evm::{self, is_evm};
 use crate::error::Unsupported;
 use crate::intrinsics::{self, Model};
 use crate::spans;
@@ -32,10 +35,55 @@ use crate::spec_ops::{SPEC_INGOT, SpecCall, spec_call};
 
 type Lowering<T> = Result<T, Unsupported>;
 
+/// What a body is lowered as.
+pub(super) enum Role {
+    Function,
+    /// A contract's `init` or a `recv` arm: it takes the message's fields,
+    /// then the context and the storage, and returns the storage it leaves.
+    Handler {
+        params: Vec<Type>,
+        state: Type,
+    },
+}
+
+/// The parameters an ordinary function takes after its own, because its
+/// body reaches what a contract provides: the context, the storage, and
+/// the effects its callers pass.
+#[derive(Debug, Default)]
+pub(super) struct Hidden<'db> {
+    env: bool,
+    state: Option<hir::hir_def::Contract<'db>>,
+    /// The effects passed in, by their index among the function's effects.
+    effects: Vec<u32>,
+}
+
+pub(super) fn hidden<'db>(body: &NormalizedBody<'db>) -> Hidden<'db> {
+    let mut hidden = Hidden::default();
+    for root in &body.roots {
+        let NRootKind::Provider { binding } = &root.kind else {
+            continue;
+        };
+        match &binding.source {
+            ProviderSource::RootProvider { .. } => hidden.env = true,
+            ProviderSource::ContractField { field } => hidden.state = Some(field.contract),
+            ProviderSource::UsesParam {
+                requirement_idx, ..
+            } => {
+                if !hidden.effects.contains(requirement_idx) {
+                    hidden.effects.push(*requirement_idx);
+                }
+            }
+        }
+    }
+    hidden.effects.sort();
+    hidden
+}
+
 pub(super) fn lower<'db>(
     lx: &mut Lowerer<'db>,
     instance: SemanticInstance<'db>,
     name: String,
+    role: Role,
 ) -> Lowering<Function> {
     let db = lx.db;
     let owner = instance.key(db).owner(db);
@@ -47,10 +95,13 @@ pub(super) fn lower<'db>(
         )
     })?;
     let body = &artifacts.body;
-    let result = lx
-        .types
-        .lower(db, instance, instance.normalized_result_ty(db))
-        .map_err(|message| Unsupported::new(span.clone(), message))?;
+    let result = match &role {
+        Role::Function => lx
+            .types
+            .lower(db, instance, instance.normalized_result_ty(db))
+            .map_err(|message| Unsupported::new(span.clone(), message))?,
+        Role::Handler { state, .. } => state.clone(),
+    };
     let mut lowering = BodyLowering {
         lx,
         instance,
@@ -61,6 +112,11 @@ pub(super) fn lower<'db>(
         blocks: HashMap::new(),
         slots: HashMap::new(),
         current: BlockId(0),
+        role,
+        env: None,
+        state: None,
+        storage: Vec::new(),
+        effects: HashMap::new(),
     };
     lowering.run()?;
     Ok(lowering.function)
@@ -76,6 +132,15 @@ struct BodyLowering<'a, 'db> {
     blocks: HashMap<NBlockId, BlockId>,
     slots: HashMap<NRootId, SlotId>,
     current: BlockId,
+    role: Role,
+    /// The EVM context the body reads.
+    env: Option<ValueId>,
+    /// The contract's storage as the body found it.
+    state: Option<ValueId>,
+    /// The slot holding each storage field the body uses, by field index.
+    storage: Vec<(u32, SlotId)>,
+    /// The value of each effect the body was passed.
+    effects: HashMap<NRootId, ValueId>,
 }
 
 /// Where a place's base leads: a slot, or a value standing for the place.
@@ -109,6 +174,7 @@ impl<'db> BodyLowering<'_, 'db> {
         let prologue = self.function.entry;
         let order = self.body.reverse_postorder();
         self.params()?;
+        self.hidden_params()?;
         for block in &order {
             let id = self.function.new_block();
             self.blocks.insert(*block, id);
@@ -149,17 +215,154 @@ impl<'db> BodyLowering<'_, 'db> {
             })
             .collect();
         params.sort();
-        for (expected, (param, value)) in params.into_iter().enumerate() {
-            if param as usize != expected {
-                return Err(self.unsupported(
-                    &self.function.span.clone(),
-                    "a parameter the body never reads is not supported",
-                ));
+        // A handler takes every field of its message, read or not.
+        if let Role::Handler { params: types, .. } = &self.role {
+            let types = types.clone();
+            for (index, ty) in types.into_iter().enumerate() {
+                let id = match params.iter().find(|(param, _)| *param as usize == index) {
+                    Some((_, value)) => self.value(*value)?,
+                    None => self.function.new_value(ty, None),
+                };
+                self.function.params.push(id);
             }
-            let id = self.value(value)?;
+            return Ok(());
+        }
+        // Every declared parameter is one, read or not, so that calls keep
+        // their arity.
+        let declared = match self.owner {
+            BodyOwner::Func(func, _) => func.arg_tys(self.lx.db).len(),
+            _ => params.len(),
+        };
+        for index in 0..declared.max(params.len()) {
+            let read = params.iter().find(|(param, _)| *param as usize == index);
+            let fe_ty = match (read, self.owner) {
+                (Some((_, value)), _) => self.body.values[value.index()].ty,
+                (None, BodyOwner::Func(func, _)) => {
+                    func.arg_tys(self.lx.db)[index].instantiate_identity()
+                }
+                (None, _) => {
+                    return Err(self.unsupported(
+                        &self.function.span.clone(),
+                        "a parameter the body never reads is not supported",
+                    ));
+                }
+            };
+            let id = match read {
+                Some((_, value)) => self.value(*value)?,
+                None => {
+                    let span = self.function.span.clone();
+                    let ty = self.ty(fe_ty, &span)?;
+                    self.function.new_value(ty, None)
+                }
+            };
+            // A method of the context reads it from its receiver.
+            let target = fe_ty
+                .as_capability(self.lx.db)
+                .map_or(fe_ty, |(_, target)| target);
+            if self.env.is_none() && is_evm(self.lx.db, target) {
+                self.env = Some(id);
+            }
             self.function.params.push(id);
         }
         Ok(())
+    }
+
+    /// The context, storage and effects the body takes after its own
+    /// parameters, in the order `Hidden` lists them.
+    fn hidden_params(&mut self) -> Lowering<()> {
+        let span = self.function.span.clone();
+        let (env, state) = match &self.role {
+            Role::Handler { state, .. } => (true, Some(state.clone())),
+            Role::Function => {
+                let hidden = hidden(self.body);
+                let state = match hidden.state {
+                    Some(contract) => Some(self.lx.state_type(contract, self.instance, &span)?),
+                    None => None,
+                };
+                (hidden.env, state)
+            }
+        };
+        if env {
+            let ty = self.lx.types.evm();
+            let param = self.function.new_value(ty, Some("ctx".to_string()));
+            self.function.params.push(param);
+            self.env = Some(param);
+        }
+        if let Some(ty) = state {
+            let param = self.function.new_value(ty, Some("storage".to_string()));
+            self.function.params.push(param);
+            self.state = Some(param);
+        }
+        if matches!(self.role, Role::Function) {
+            for requirement in hidden(self.body).effects {
+                let mut param = None;
+                for (index, root) in self.body.roots.iter().enumerate() {
+                    let NRootKind::Provider { binding } = &root.kind else {
+                        continue;
+                    };
+                    let ProviderSource::UsesParam {
+                        requirement_idx, ..
+                    } = binding.source
+                    else {
+                        continue;
+                    };
+                    if requirement_idx != requirement {
+                        continue;
+                    }
+                    let value = match param {
+                        Some(value) => value,
+                        None => {
+                            let ty = self.ty(binding.effective_target_ty(), &span)?;
+                            let value = self.function.new_value(ty, None);
+                            self.function.params.push(value);
+                            param = Some(value);
+                            value
+                        }
+                    };
+                    self.effects.insert(NRootId::new(index), value);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The storage as it stands: each field the body holds in a slot, and
+    /// the others as the body found them.
+    fn current_state(&mut self, span: &Span) -> Lowering<ValueId> {
+        let state = self
+            .state
+            .ok_or_else(|| self.unsupported(span, "a call that needs the contract's storage"))?;
+        if self.storage.is_empty() {
+            return Ok(state);
+        }
+        let ty = self.function.ty(state).clone();
+        let Type::Tuple(fields) = &ty else {
+            return Err(self.unsupported(span, "storage that is not a tuple of fields"));
+        };
+        let mut values = Vec::new();
+        for (index, field_ty) in fields.clone().into_iter().enumerate() {
+            let held = self
+                .storage
+                .iter()
+                .find(|(field, _)| *field as usize == index)
+                .map(|(_, slot)| *slot);
+            let expr = match held {
+                Some(slot) => Expr::Load {
+                    slot,
+                    path: Vec::new(),
+                },
+                None => Expr::Project {
+                    value: state,
+                    path: vec![Proj::Field(index as u16)],
+                },
+            };
+            values.push(self.fresh(field_ty, expr, span.clone()));
+        }
+        let make = Expr::Make {
+            ty: ty.clone(),
+            fields: values,
+        };
+        Ok(self.fresh(ty, make, span.clone()))
     }
 
     /// Slots for the body's local storage, and the stores that give
@@ -192,7 +395,35 @@ impl<'db> BodyLowering<'_, 'db> {
                     );
                 }
                 NRootKind::Temporary { .. } | NRootKind::CapabilityRepresentation { .. } => {}
-                NRootKind::Provider { .. } => {}
+                NRootKind::Provider { binding } => {
+                    let ProviderSource::ContractField { field } = binding.source else {
+                        continue;
+                    };
+                    let span = self.span(root.origin);
+                    let ty = self.ty(binding.effective_target_ty(), &span)?;
+                    let state = self.state.ok_or_else(|| {
+                        self.unsupported(&span, "contract storage outside the contract")
+                    })?;
+                    let slot = self.function.new_slot(ty.clone(), None);
+                    self.slots.insert(id, slot);
+                    self.storage.push((field.index, slot));
+                    let value = self.fresh(
+                        ty,
+                        Expr::Project {
+                            value: state,
+                            path: vec![Proj::Field(field.index as u16)],
+                        },
+                        span.clone(),
+                    );
+                    self.push(
+                        StmtKind::Store {
+                            slot,
+                            path: Vec::new(),
+                            value,
+                        },
+                        span,
+                    );
+                }
             }
         }
         Ok(())
@@ -245,6 +476,15 @@ impl<'db> BodyLowering<'_, 'db> {
                 let value = self.operand(value)?;
                 match self.base(destination, &span)? {
                     Base::Slot(slot) => {
+                        if matches!(self.role, Role::Function)
+                            && self.storage.iter().any(|(_, held)| *held == slot)
+                        {
+                            return Err(self.unsupported(
+                                &span,
+                                "writing contract storage outside a contract's `init` and \
+                                 `recv` arms is not supported yet",
+                            ));
+                        }
                         let path = self.path(destination.path.as_slice(), &span)?;
                         self.push(StmtKind::Store { slot, path, value }, span);
                         Ok(())
@@ -289,9 +529,24 @@ impl<'db> BodyLowering<'_, 'db> {
                     | NRootKind::CapabilityRepresentation { carrier: value } => {
                         Ok(Base::Value(self.value(value)?))
                     }
-                    NRootKind::Provider { .. } => {
-                        Err(self.unsupported(span, "effect providers are not supported yet"))
-                    }
+                    NRootKind::Provider { binding } => match binding.source {
+                        ProviderSource::RootProvider { .. } => {
+                            self.env.map(Base::Value).ok_or_else(|| {
+                                self.unsupported(span, "the EVM context outside a contract")
+                            })
+                        }
+                        ProviderSource::UsesParam { .. } => self
+                            .effects
+                            .get(&root)
+                            .copied()
+                            .map(Base::Value)
+                            .ok_or_else(|| {
+                                self.unsupported(span, "an effect the function was not passed")
+                            }),
+                        ProviderSource::ContractField { .. } => {
+                            Err(self.unsupported(span, "contract storage outside the contract"))
+                        }
+                    },
                     NRootKind::LocalSlot { .. } | NRootKind::ParamPlace { .. } => {
                         Err(self.unsupported(span, "a local place without storage"))
                     }
@@ -347,6 +602,7 @@ impl<'db> BodyLowering<'_, 'db> {
             NExpr::Load { place, .. } | NExpr::MakeView { place, .. } => self.read(place, &span)?,
             NExpr::Borrow { place, kind, .. } => match kind {
                 BorrowKind::Ref => self.read(place, &span)?,
+                BorrowKind::Mut if is_evm(self.lx.db, place.ty) => self.read(place, &span)?,
                 BorrowKind::Mut => {
                     return Err(self.unsupported(&span, "mutable borrows are not supported yet"));
                 }
@@ -412,15 +668,12 @@ impl<'db> BodyLowering<'_, 'db> {
                 effect_args,
                 ..
             } => {
-                if !effect_args.is_empty() {
-                    return Err(self.unsupported(&span, "calls with effects are not supported yet"));
-                }
                 let args = args
                     .iter()
                     .map(|arg| self.operand(arg))
                     .collect::<Lowering<Vec<_>>>()?;
                 let instance = SemanticInstance::new(self.lx.db, callee.key);
-                return self.call(result, instance, args, span);
+                return self.call(result, instance, args, effect_args, span);
             }
             NExpr::StructuralRepack { .. } => {
                 return Err(self.unsupported(&span, "structural repacking is not supported yet"));
@@ -443,7 +696,8 @@ impl<'db> BodyLowering<'_, 'db> {
         &mut self,
         result: NValueId,
         instance: SemanticInstance<'db>,
-        args: Vec<ValueId>,
+        mut args: Vec<ValueId>,
+        effect_args: &[NEffectArg<'db>],
         span: Span,
     ) -> Lowering<()> {
         let db = self.lx.db;
@@ -457,6 +711,31 @@ impl<'db> BodyLowering<'_, 'db> {
         let ingot = func.top_mod(db).ingot(db);
         let ingot_name = super::ingot_name(db, ingot);
         let dst = self.value(result)?;
+        if let Some(model) = evm::model(db, func) {
+            let expr = match model {
+                evm::Model::Revert => {
+                    self.terminate(Terminator::Fail(PanicKind::Revert), span.clone());
+                    self.current = self.function.new_block();
+                    Expr::Const(Const::Unit)
+                }
+                evm::Model::Emit => Expr::Const(Const::Unit),
+                evm::Model::Context(field) => {
+                    let env = self.env.ok_or_else(|| {
+                        self.unsupported(
+                            &span,
+                            format!("`{name}` reads the EVM context outside it"),
+                        )
+                    })?;
+                    Expr::Project {
+                        value: env,
+                        path: vec![Proj::Field(field as u16)],
+                    }
+                }
+                evm::Model::Unconstrained => Expr::Havoc,
+            };
+            self.define(dst, expr, span);
+            return Ok(());
+        }
         if ingot_name.as_deref() == Some(SPEC_INGOT)
             && let Some(call) = spec_call(&name)
         {
@@ -510,6 +789,35 @@ impl<'db> BodyLowering<'_, 'db> {
             return Ok(());
         }
         let callee = self.lx.function(instance)?;
+        if let Ok(artifacts) = normalize_semantic_body(db, instance) {
+            let hidden = hidden(&artifacts.body);
+            if hidden.env {
+                let env = self.env.ok_or_else(|| {
+                    self.unsupported(&span, format!("`{name}` needs the EVM context"))
+                })?;
+                args.push(env);
+            }
+            if hidden.state.is_some() {
+                args.push(self.current_state(&span)?);
+            }
+            for requirement in hidden.effects {
+                let passed = effect_args
+                    .iter()
+                    .find(|arg| arg.binding_idx == requirement)
+                    .ok_or_else(|| {
+                        self.unsupported(&span, format!("a call to `{name}` without its effects"))
+                    })?;
+                let value = match &passed.arg {
+                    NEffectArgValue::Value(operand) => self.operand(operand)?,
+                    NEffectArgValue::Place(place) => {
+                        let ty = self.ty(place.ty, &span)?;
+                        let expr = self.read(place, &span)?;
+                        self.fresh(ty, expr, span.clone())
+                    }
+                };
+                args.push(value);
+            }
+        }
         self.define(dst, Expr::Call { func: callee, args }, span);
         Ok(())
     }
@@ -557,6 +865,9 @@ impl<'db> BodyLowering<'_, 'db> {
                 })
             }
             NTerminatorKind::Unreachable => Terminator::Unreachable,
+            NTerminatorKind::Return(_) if matches!(self.role, Role::Handler { .. }) => {
+                Terminator::Return(self.current_state(span)?)
+            }
             NTerminatorKind::Return(Some(value)) | NTerminatorKind::Yield { value, .. } => {
                 Terminator::Return(self.operand(value)?)
             }

@@ -22,6 +22,13 @@ pub(crate) fn origin(db: &DriverDataBase, owner: BodyOwner<'_>, origin: SemOrigi
     resolved.map_or_else(Span::default, |span| convert(db, &span))
 }
 
+pub(crate) fn of_contract(db: &DriverDataBase, contract: hir::hir_def::Contract<'_>) -> Span {
+    contract
+        .span()
+        .resolve(db)
+        .map_or_else(Span::default, |span| convert(db, &span))
+}
+
 pub(crate) fn of_owner(db: &DriverDataBase, owner: BodyOwner<'_>) -> Span {
     owner
         .body(db)

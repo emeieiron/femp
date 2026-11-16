@@ -8,11 +8,13 @@ use femp_core::property::{Location, Param, Property, PropertyKind, Suite, Ty};
 pub struct Claims {
     pub suite: Suite,
     pub contracts: Vec<Contract>,
+    /// The deployed contracts whose storage `#[invariant]`s describe.
+    pub storage: Vec<StorageClaim>,
 }
 
 impl Claims {
     pub fn is_empty(&self) -> bool {
-        self.suite.is_empty() && self.contracts.is_empty()
+        self.suite.is_empty() && self.contracts.is_empty() && self.storage.is_empty()
     }
 
     /// The entry points property testing runs: the suite, and the specs it
@@ -35,7 +37,29 @@ impl Claims {
             .retain(|machine| machine.name.contains(pattern));
         self.contracts
             .retain(|contract| contract.name.contains(pattern));
+        self.storage.retain(|claim| claim.name.contains(pattern));
     }
+}
+
+/// A `contract` and the `#[invariant]` functions that state what its
+/// storage keeps after every message it accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageClaim {
+    /// The contract's name.
+    pub name: String,
+    /// The module path of the contract inside its ingot.
+    pub path: Vec<String>,
+    pub invariants: Vec<StorageInvariant>,
+    pub location: Location,
+}
+
+/// A free function of the contract's fields, named as its parameters, that
+/// returns `bool`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageInvariant {
+    pub name: String,
+    pub path: Vec<String>,
+    pub location: Location,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

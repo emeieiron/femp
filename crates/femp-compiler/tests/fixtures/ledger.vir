@@ -1,0 +1,316 @@
+fields: ["store"]
+init (cap: u64) context=0 payable=false selector=None
+Deposit (ctx.timestamp: u256, amount: u64) context=1 payable=false selector=Some("0x13765838")
+Move (amount: u64, back: bool) context=0 payable=false selector=Some("0xf49c65b8")
+Total () context=0 payable=false selector=Some("0x2ddbd13a")
+
+target evm
+type t0 LedgerStore = struct { total: u64, cap: u64, last: u64 }
+type t1 Evm = struct { timestamp: u256, block_number: u256, caller: u256, value: u256, origin: u256, address: u256, coinbase: u256, gasprice: u256, prevrandao: u256, gaslimit: u256, chainid: u256, basefee: u256, selfbalance: u256, blobbasefee: u256 }
+type t2 Timestamp = struct { secs: u256 }
+type t3 Deposited = struct { amount: u64 }
+type t4 OverCap = struct { amount: u64 }
+
+f0 Ledger::init(v0: u64, v1 ctx: Evm, v2 storage: (LedgerStore)) -> (LedgerStore)  @src/lib.fe:27
+  slot s0: LedgerStore
+bb0:
+  v3: LedgerStore = v2.0  @src/lib.fe:27
+  store s0 = v3  @src/lib.fe:27
+  goto bb1()
+bb1:
+  v4: u64 = v0  @src/lib.fe:27
+  store s0.1 = v4  @src/lib.fe:27
+  v6: () = ()
+  v5: () = v6
+  v7: LedgerStore = load s0  @src/lib.fe:27
+  v8: (LedgerStore) = make (LedgerStore) {v7}  @src/lib.fe:27
+  return v8  @src/lib.fe:27
+
+f1 Ledger::Deposit(v0: u64, v1 ctx: Evm, v2 storage: (LedgerStore)) -> (LedgerStore)  @src/lib.fe:30
+  slot s0: LedgerStore
+bb0:
+  v3: LedgerStore = v2.0  @src/lib.fe:30
+  store s0 = v3  @src/lib.fe:30
+  goto bb1()
+bb1:
+  v4: u64 = load s0.1  @src/lib.fe:31
+  v5: u64 = load s0.0  @src/lib.fe:31
+  v6: u64 = sub.checked v4, v5  @src/lib.fe:31
+  v7: bool = gt v0, v6  @src/lib.fe:31
+  branch v7 -> bb4(), bb2()
+bb2:
+  v9: () = ()
+  v8: () = v9
+  v10: () = v8
+  goto bb3()
+bb3:
+  v11: u64 = load s0.0  @src/lib.fe:34
+  v12: u64 = add.checked v11, v0  @src/lib.fe:34
+  store s0.0 = v12  @src/lib.fe:34
+  v14: () = ()
+  v13: () = v14
+  v15: u64 = call f2(v1)  @src/lib.fe:35
+  store s0.2 = v15  @src/lib.fe:35
+  v17: () = ()
+  v16: () = v17
+  v18: Deposited = make Deposited {v0}  @src/lib.fe:36
+  v19: Evm = v1  @src/lib.fe:36
+  v20: () = ()  @src/lib.fe:36
+  v21: u64 = load s0.0  @src/lib.fe:37
+  v22: LedgerStore = load s0  @src/lib.fe:30
+  v23: (LedgerStore) = make (LedgerStore) {v22}  @src/lib.fe:30
+  return v23  @src/lib.fe:30
+bb4:
+  v24: OverCap = make OverCap {v0}  @src/lib.fe:32
+  fail (revert)  @src/lib.fe:32
+bb5:
+  v25: () = ()  @src/lib.fe:32
+  unreachable
+
+f2 now(v0 ctx: Evm) -> u64  @src/lib.fe:20
+  slot s0: Timestamp
+bb0:
+  goto bb1()
+bb1:
+  v1: Evm = v0  @src/lib.fe:21
+  v2: Timestamp = call f3(v1)  @src/lib.fe:21
+  store s0 = v2  @src/lib.fe:21
+  v3: Timestamp = load s0  @src/lib.fe:21
+  v4: u256 = call f5(v3)  @src/lib.fe:21
+  v5: u64 = call f6(v4)  @src/lib.fe:21
+  return v5  @src/lib.fe:20
+
+f3 std::timestamp(v0: Evm) -> Timestamp  @std:src/evm/effects.fe:909
+bb0:
+  goto bb1()
+bb1:
+  v1: u256 = v0.0  @std:src/evm/effects.fe:910
+  v2: Timestamp = call f4(v1)  @std:src/evm/effects.fe:910
+  return v2  @std:src/evm/effects.fe:909
+
+f4 std::evm::units::Timestamp::from_seconds(v0: u256) -> Timestamp  @std:src/evm/units.fe:271
+bb0:
+  goto bb1()
+bb1:
+  v1: u256 = v0  @std:src/evm/units.fe:272
+  v2: Timestamp = make Timestamp {v1}  @std:src/evm/units.fe:272
+  return v2  @std:src/evm/units.fe:271
+
+f5 std::evm::units::Timestamp::as_seconds(v0: Timestamp) -> u256  @std:src/evm/units.fe:276
+bb0:
+  goto bb1()
+bb1:
+  v1: u256 = v0.0  @std:src/evm/units.fe:277
+  return v1  @std:src/evm/units.fe:276
+
+f6 core::downcast_truncate(v0: u256) -> u64  @core:src/num.fe:855
+bb0:
+  goto bb1()
+bb1:
+  v2: u256 = call f7(v0)  @core:src/num.fe:856
+  v3: u256 = v2  @core:src/num.fe:856
+  v5: bool = false  @core:src/num.fe:857
+  v4: bool = v5  @core:src/num.fe:857
+  branch v4 -> bb3(), bb2()
+bb2:
+  v7: u256 = 18446744073709551615  @core:src/num.fe:860
+  v6: u256 = v7  @core:src/num.fe:860
+  v8: u256 = bitand v3, v6  @core:src/num.fe:860
+  v9: u64 = call f8(v8)  @core:src/num.fe:860
+  v10: u64 = v9
+  goto bb4(v10)
+bb3:
+  v12: u256 = 18446744073709551615  @core:src/num.fe:858
+  v11: u256 = v12  @core:src/num.fe:858
+  v14: u256 = 0  @core:src/num.fe:858
+  v13: u256 = v14  @core:src/num.fe:858
+  v15: u256 = call f9(v3, v11, v13)  @core:src/num.fe:858
+  v16: u64 = call f8(v15)  @core:src/num.fe:858
+  v17: u64 = v16
+  goto bb4(v17)
+bb4(v1: u64):
+  return v1  @core:src/num.fe:855
+
+f7 core::to_word(v0: u256) -> u256  @core:src/num.fe:747
+bb0:
+  goto bb1()
+bb1:
+  v1: u256 = v0  @core:src/num.fe:747
+  return v1  @core:src/num.fe:747
+
+f8 core::from_word(v0: u256) -> u64  @core:src/num.fe:730
+bb0:
+  goto bb1()
+bb1:
+  v1: u64 = bitcast(v0)  @core:src/num.fe:730
+  return v1  @core:src/num.fe:730
+
+f9 core::num::sign_extend(v0: u256, v1: u256, v2: u256) -> u256  @core:src/num.fe:914
+bb0:
+  goto bb1()
+bb1:
+  v4: u256 = v0  @core:src/num.fe:915
+  v5: u256 = v1  @core:src/num.fe:915
+  v6: u256 = bitand v4, v5  @core:src/num.fe:915
+  v7: u256 = v6  @core:src/num.fe:915
+  v8: u256 = v2  @core:src/num.fe:916
+  v9: u256 = bitand v7, v8  @core:src/num.fe:916
+  v11: u256 = 0  @core:src/num.fe:916
+  v10: u256 = v11  @core:src/num.fe:916
+  v12: bool = ne v9, v10  @core:src/num.fe:916
+  branch v12 -> bb3(), bb2()
+bb2:
+  v13: u256 = v7
+  goto bb4(v13)
+bb3:
+  v15: u256 = 115792089237316195423570985008687907853269984665640564039457584007913129639935  @core:src/num.fe:917
+  v14: u256 = v15  @core:src/num.fe:917
+  v16: u256 = v1  @core:src/num.fe:917
+  v17: u256 = bitxor v14, v16  @core:src/num.fe:917
+  v18: u256 = bitor v7, v17  @core:src/num.fe:917
+  v19: u256 = v18
+  goto bb4(v19)
+bb4(v3: u256):
+  return v3  @core:src/num.fe:914
+
+f10 Ledger::Move(v0: u64, v1: bool, v2 ctx: Evm, v3 storage: (LedgerStore)) -> (LedgerStore)  @src/lib.fe:40
+  slot s0: LedgerStore
+bb0:
+  v4: LedgerStore = v3.0  @src/lib.fe:40
+  store s0 = v4  @src/lib.fe:40
+  goto bb1()
+bb1:
+  branch v1 -> bb2(), bb3()
+bb2:
+  v5: u64 = load s0.0  @src/lib.fe:41
+  v6: bool = le v0, v5  @src/lib.fe:41
+  branch v6 -> bb4(), bb3()
+bb3:
+  v8: () = ()
+  v7: () = v8
+  v9: () = v7
+  goto bb5()
+bb4:
+  v10: u64 = load s0.0  @src/lib.fe:42
+  v11: u64 = sub.checked v10, v0  @src/lib.fe:42
+  store s0.0 = v11  @src/lib.fe:42
+  v13: () = ()
+  v12: () = v13
+  v14: () = v12
+  goto bb5()
+bb5:
+  v15: u64 = load s0.0  @src/lib.fe:44
+  v16: LedgerStore = load s0  @src/lib.fe:40
+  v17: (LedgerStore) = make (LedgerStore) {v16}  @src/lib.fe:40
+  return v17  @src/lib.fe:40
+
+f11 Ledger::Total(v0 ctx: Evm, v1 storage: (LedgerStore)) -> (LedgerStore)  @src/lib.fe:47
+  slot s0: LedgerStore
+bb0:
+  v2: LedgerStore = v1.0  @src/lib.fe:47
+  store s0 = v2  @src/lib.fe:47
+  goto bb1()
+bb1:
+  v3: u64 = load s0.0  @src/lib.fe:48
+  v4: LedgerStore = load s0  @src/lib.fe:47
+  v5: (LedgerStore) = make (LedgerStore) {v4}  @src/lib.fe:47
+  return v5  @src/lib.fe:47
+
+f12 within_cap(v0: LedgerStore) -> bool  @src/lib.fe:54
+bb0:
+  goto bb1()
+bb1:
+  v1: u64 = v0.0  @src/lib.fe:55
+  v2: u64 = v0.1  @src/lib.fe:55
+  v3: bool = le v1, v2  @src/lib.fe:55
+  return v3  @src/lib.fe:54
+
+f13 Ledger::init(v0 cap: u64) -> (LedgerStore)  @src/lib.fe:27
+bb0:
+  v1: u256 = havoc  @src/lib.fe:27
+  v2: u256 = havoc  @src/lib.fe:27
+  v3: u256 = havoc  @src/lib.fe:27
+  v4: u256 = 0  @src/lib.fe:27
+  v5: u256 = havoc  @src/lib.fe:27
+  v6: u256 = havoc  @src/lib.fe:27
+  v7: u256 = havoc  @src/lib.fe:27
+  v8: u256 = havoc  @src/lib.fe:27
+  v9: u256 = havoc  @src/lib.fe:27
+  v10: u256 = havoc  @src/lib.fe:27
+  v11: u256 = havoc  @src/lib.fe:27
+  v12: u256 = havoc  @src/lib.fe:27
+  v13: u256 = havoc  @src/lib.fe:27
+  v14: u256 = havoc  @src/lib.fe:27
+  v15: Evm = make Evm {v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14}  @src/lib.fe:27
+  v16: u64 = 0  @src/lib.fe:27
+  v17: u64 = 0  @src/lib.fe:27
+  v18: u64 = 0  @src/lib.fe:27
+  v19: LedgerStore = make LedgerStore {v16, v17, v18}  @src/lib.fe:27
+  v20: (LedgerStore) = make (LedgerStore) {v19}  @src/lib.fe:27
+  v21: (LedgerStore) = call f0(v0, v15, v20)  @src/lib.fe:27
+  return v21  @src/lib.fe:27
+
+f14 Ledger::Deposit(v0 storage: (LedgerStore), v1 ctx.timestamp: u256, v2 amount: u64) -> (LedgerStore)  @src/lib.fe:30
+bb0:
+  v3: u256 = havoc  @src/lib.fe:30
+  v4: u256 = havoc  @src/lib.fe:30
+  v5: u256 = 0  @src/lib.fe:30
+  v6: u256 = havoc  @src/lib.fe:30
+  v7: u256 = havoc  @src/lib.fe:30
+  v8: u256 = havoc  @src/lib.fe:30
+  v9: u256 = havoc  @src/lib.fe:30
+  v10: u256 = havoc  @src/lib.fe:30
+  v11: u256 = havoc  @src/lib.fe:30
+  v12: u256 = havoc  @src/lib.fe:30
+  v13: u256 = havoc  @src/lib.fe:30
+  v14: u256 = havoc  @src/lib.fe:30
+  v15: u256 = havoc  @src/lib.fe:30
+  v16: Evm = make Evm {v1, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15}  @src/lib.fe:30
+  v17: (LedgerStore) = call f1(v2, v16, v0)  @src/lib.fe:30
+  return v17  @src/lib.fe:30
+
+f15 Ledger::Move(v0 storage: (LedgerStore), v1 amount: u64, v2 back: bool) -> (LedgerStore)  @src/lib.fe:40
+bb0:
+  v3: u256 = havoc  @src/lib.fe:40
+  v4: u256 = havoc  @src/lib.fe:40
+  v5: u256 = havoc  @src/lib.fe:40
+  v6: u256 = 0  @src/lib.fe:40
+  v7: u256 = havoc  @src/lib.fe:40
+  v8: u256 = havoc  @src/lib.fe:40
+  v9: u256 = havoc  @src/lib.fe:40
+  v10: u256 = havoc  @src/lib.fe:40
+  v11: u256 = havoc  @src/lib.fe:40
+  v12: u256 = havoc  @src/lib.fe:40
+  v13: u256 = havoc  @src/lib.fe:40
+  v14: u256 = havoc  @src/lib.fe:40
+  v15: u256 = havoc  @src/lib.fe:40
+  v16: u256 = havoc  @src/lib.fe:40
+  v17: Evm = make Evm {v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16}  @src/lib.fe:40
+  v18: (LedgerStore) = call f10(v1, v2, v17, v0)  @src/lib.fe:40
+  return v18  @src/lib.fe:40
+
+f16 Ledger::Total(v0 storage: (LedgerStore)) -> (LedgerStore)  @src/lib.fe:47
+bb0:
+  v1: u256 = havoc  @src/lib.fe:47
+  v2: u256 = havoc  @src/lib.fe:47
+  v3: u256 = havoc  @src/lib.fe:47
+  v4: u256 = 0  @src/lib.fe:47
+  v5: u256 = havoc  @src/lib.fe:47
+  v6: u256 = havoc  @src/lib.fe:47
+  v7: u256 = havoc  @src/lib.fe:47
+  v8: u256 = havoc  @src/lib.fe:47
+  v9: u256 = havoc  @src/lib.fe:47
+  v10: u256 = havoc  @src/lib.fe:47
+  v11: u256 = havoc  @src/lib.fe:47
+  v12: u256 = havoc  @src/lib.fe:47
+  v13: u256 = havoc  @src/lib.fe:47
+  v14: u256 = havoc  @src/lib.fe:47
+  v15: Evm = make Evm {v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14}  @src/lib.fe:47
+  v16: (LedgerStore) = call f11(v15, v0)  @src/lib.fe:47
+  return v16  @src/lib.fe:47
+
+f17 Ledger::within_cap(v0 storage: (LedgerStore)) -> bool  @src/lib.fe:54
+bb0:
+  v1: LedgerStore = v0.0  @src/lib.fe:54
+  v2: bool = call f12(v1)  @src/lib.fe:54
+  return v2  @src/lib.fe:54

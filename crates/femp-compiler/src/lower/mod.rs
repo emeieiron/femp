@@ -3,6 +3,8 @@
 //! that reaches it, with the location of the construct.
 
 mod body;
+mod contract;
+pub(crate) mod evm;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -19,15 +21,24 @@ use crate::session::Session;
 use crate::spans;
 use crate::types::Types;
 
+pub use contract::{ContractRoot, Handler, LoweredContract};
+
 /// The program for a set of roots, and for each root its function or why it
-/// cannot be lowered.
+/// cannot be lowered; likewise for each contract.
 pub struct Lowered {
     pub program: Program,
     pub roots: Vec<Result<FuncId, Unsupported>>,
+    pub contracts: Vec<Result<LoweredContract, Unsupported>>,
 }
 
 impl Session {
     pub fn lower(&self, roots: &[Root]) -> Lowered {
+        self.lower_with(roots, &[])
+    }
+
+    /// Lowers `roots`, and each of `contracts` with its invariants, into
+    /// one program.
+    pub fn lower_with(&self, roots: &[Root], contracts: &[ContractRoot]) -> Lowered {
         let mut lowerer = Lowerer {
             db: &self.db,
             root_ingot: ingot_name(&self.db, self.ingot()).unwrap_or_default(),
@@ -39,6 +50,8 @@ impl Session {
             functions: HashMap::new(),
             failed: HashMap::new(),
             names: BTreeSet::new(),
+            states: HashMap::new(),
+            ingot: self.ingot(),
         };
         let results = roots
             .iter()
@@ -51,11 +64,50 @@ impl Session {
                 Ok(id)
             })
             .collect();
+        // Every context field any handler reads is known only once all of
+        // them are lowered.
+        let pending: Vec<_> = contracts
+            .iter()
+            .map(|root| {
+                let contract = self.find_contract(root).ok_or_else(|| {
+                    Unsupported::new(
+                        Span::default(),
+                        format!("the contract `{}` was not found", root.name),
+                    )
+                })?;
+                lowerer.contract(contract, root)
+            })
+            .collect();
+        let contracts = pending
+            .into_iter()
+            .map(|pending| pending.map(|pending| pending.wrap(&mut lowerer)))
+            .collect();
         lowerer.program.types = lowerer.types.table;
         Lowered {
             program: lowerer.program,
             roots: results,
+            contracts,
         }
+    }
+
+    fn find_contract(&self, root: &ContractRoot) -> Option<hir::hir_def::Contract<'_>> {
+        let db = &self.db;
+        let tree = hir::lower::module_tree(db, self.ingot());
+        tree.all_modules()
+            .flat_map(|top| top.all_contracts(db).to_vec())
+            .find(|contract| {
+                let name = match contract.name(db) {
+                    Partial::Present(name) => name.data(db).to_string(),
+                    Partial::Absent => return false,
+                };
+                let path = contract
+                    .scope()
+                    .parent_module(db)
+                    .and_then(|module| module.pretty_path(db))
+                    .map(|path| path.split("::").skip(1).map(str::to_string).collect())
+                    .unwrap_or_else(Vec::new);
+                name == root.name && path == root.path
+            })
     }
 }
 
@@ -86,6 +138,9 @@ pub(crate) struct Lowerer<'db> {
     functions: HashMap<SemanticInstance<'db>, FuncId>,
     failed: HashMap<FuncId, Unsupported>,
     names: BTreeSet<String>,
+    /// Each contract's storage, as a tuple of its fields.
+    states: HashMap<hir::hir_def::Contract<'db>, Type>,
+    ingot: hir::Ingot<'db>,
 }
 
 impl<'db> Lowerer<'db> {
@@ -121,7 +176,7 @@ impl<'db> Lowerer<'db> {
             spans::of_owner(self.db, owner),
         ));
         self.functions.insert(instance, id);
-        match body::lower(self, instance, name) {
+        match body::lower(self, instance, name, body::Role::Function) {
             Ok(function) => {
                 *self.program.function_mut(id) = function;
                 Ok(id)
@@ -131,6 +186,31 @@ impl<'db> Lowerer<'db> {
                 Err(error)
             }
         }
+    }
+
+    /// A contract's storage: a tuple of its fields in declaration order.
+    pub(crate) fn state_type(
+        &mut self,
+        contract: hir::hir_def::Contract<'db>,
+        instance: SemanticInstance<'db>,
+        span: &Span,
+    ) -> Result<Type, Unsupported> {
+        if let Some(found) = self.states.get(&contract) {
+            return Ok(found.clone());
+        }
+        let mut fields: Vec<_> = contract.fields(self.db).values().cloned().collect();
+        fields.sort_by_key(|field| field.index);
+        let mut types = Vec::new();
+        for field in fields {
+            types.push(
+                self.types
+                    .lower(self.db, instance, field.declared)
+                    .map_err(|message| Unsupported::new(span.clone(), message))?,
+            );
+        }
+        let state = Type::Tuple(types);
+        self.states.insert(contract, state.clone());
+        Ok(state)
     }
 
     fn unique_name(&mut self, owner: BodyOwner<'db>) -> String {

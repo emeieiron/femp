@@ -170,6 +170,10 @@ pub fn report(
             }
         }
         Entry::Contract(index) => contract_status(plan, &claims.contracts[index], places),
+        Entry::Storage(_) => match &plan.machine {
+            Some(machine) => machine_status(plan, machine, places),
+            None => (None, None),
+        },
     };
     let status = status.unwrap_or_else(|| {
         if let Some(reason) = unknown {

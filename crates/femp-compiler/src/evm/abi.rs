@@ -771,7 +771,7 @@ fn selector_for_signature(signature: &str) -> u32 {
     u32::from_be_bytes([output[0], output[1], output[2], output[3]])
 }
 
-fn resolve_sol_abi_ty<'db>(
+pub(crate) fn resolve_sol_abi_ty<'db>(
     db: &'db DriverDataBase,
     scope: ScopeId<'db>,
 ) -> Result<TyId<'db>, String> {

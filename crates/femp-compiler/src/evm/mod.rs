@@ -103,6 +103,14 @@ impl Session {
     }
 }
 
+/// The `Sol` ABI type a contract's messages are encoded with.
+pub(crate) fn sol_abi_ty<'db>(
+    db: &'db driver::DriverDataBase,
+    contract: hir::hir_def::Contract<'db>,
+) -> Result<hir::analysis::ty::ty_def::TyId<'db>, String> {
+    abi::resolve_sol_abi_ty(db, contract.scope())
+}
+
 // The objects the ingot's modules deploy: its contracts, and the root
 // module's `main`.
 fn contract_names(session: &Session) -> Result<Vec<String>, CompileError> {

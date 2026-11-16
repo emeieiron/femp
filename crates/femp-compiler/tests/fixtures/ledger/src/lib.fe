@@ -1,0 +1,61 @@
+use std::evm::{Ctx, Evm, Log, revert_error}
+
+msg LedgerMsg {
+    #[selector = sol("deposit(uint64)")]
+    Deposit { amount: u64 } -> u64,
+    #[selector = sol("move(uint64,bool)")]
+    Move { amount: u64, back: bool } -> u64,
+    #[selector = sol("total()")]
+    Total -> u64,
+}
+
+#[event]
+pub struct Deposited { pub amount: u64 }
+
+#[error]
+pub struct OverCap { pub amount: u64 }
+
+pub struct LedgerStore { pub total: u64, pub cap: u64, pub last: u64 }
+
+fn now() -> u64 uses (ctx: Ctx) {
+    ctx.timestamp().as_seconds().downcast_truncate()
+}
+
+pub contract Ledger uses (ctx: Ctx, log: mut Log) {
+    mut store: LedgerStore,
+
+    init(cap: u64) uses (mut store) { store.cap = cap }
+
+    recv LedgerMsg {
+        Deposit { amount } -> u64 uses (mut store, ctx, mut log) {
+            if amount > store.cap - store.total {
+                revert_error(OverCap { amount })
+            }
+            store.total = store.total + amount
+            store.last = now()
+            log.emit(Deposited { amount })
+            store.total
+        }
+
+        Move { amount, back } -> u64 uses (mut store) {
+            if back && amount <= store.total {
+                store.total = store.total - amount
+            }
+            store.total
+        }
+
+        Total -> u64 uses (store) {
+            store.total
+        }
+    }
+}
+
+#[invariant]
+fn within_cap(store: LedgerStore) -> bool {
+    store.total <= store.cap
+}
+
+#[invariant]
+fn below_hundred(store: LedgerStore) -> bool {
+    store.total < 100
+}

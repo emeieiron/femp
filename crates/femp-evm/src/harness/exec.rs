@@ -18,7 +18,7 @@ use revm::state::AccountInfo;
 
 use super::render::{self, Message};
 
-const GAS_LIMIT: u64 = 1_000_000_000;
+pub(crate) const GAS_LIMIT: u64 = 1_000_000_000;
 const CODE_SIZE_LIMIT: usize = 1024 * 1024;
 
 pub struct EvmExecutor {
@@ -28,9 +28,9 @@ pub struct EvmExecutor {
     suite: Suite,
 }
 
-type Evm = revm::handler::MainnetEvm<MainnetContext<InMemoryDB>>;
+pub(crate) type Evm = revm::handler::MainnetEvm<MainnetContext<InMemoryDB>>;
 
-fn configure(cfg: &mut CfgEnv) {
+pub(crate) fn configure(cfg: &mut CfgEnv) {
     // Fe emits code for the Osaka revision.
     cfg.spec = SpecId::OSAKA;
     cfg.tx_gas_limit_cap = Some(u64::MAX);
@@ -39,7 +39,7 @@ fn configure(cfg: &mut CfgEnv) {
     cfg.disable_nonce_check = true;
 }
 
-fn evm(db: InMemoryDB) -> Evm {
+pub(crate) fn evm(db: InMemoryDB) -> Evm {
     Context::mainnet()
         .with_db(db)
         .modify_cfg_chained(configure)
@@ -136,7 +136,7 @@ pub fn outcome(result: ExecutionResult, ty: Ty) -> Outcome {
     }
 }
 
-fn halt(reason: HaltReason) -> Trap {
+pub(crate) fn halt(reason: HaltReason) -> Trap {
     match reason {
         HaltReason::OutOfGas(_) => Trap::OutOfGas,
         other => Trap::Halted(format!("{other:?}")),
@@ -283,7 +283,7 @@ impl Executor for EvmExecutor {
     }
 }
 
-fn decode_hex(text: &str) -> Result<Vec<u8>> {
+pub(crate) fn decode_hex(text: &str) -> Result<Vec<u8>> {
     let text = text.trim().trim_start_matches("0x");
     if !text.len().is_multiple_of(2) {
         return Err(Error::Artifact(

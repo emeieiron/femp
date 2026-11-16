@@ -9,7 +9,10 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use femp_core::platform::Platform;
 use femp_core::project::{BUILD_DIR, Module};
-use femp_core::property::{Executor, HarnessRequest, Outcome, Suite, Support, Trace};
+use femp_core::property::{
+    Delivery, Executor, HarnessRequest, Machine, Method, Outcome, Sequence, Suite, Support, Trace,
+    Transaction, Transactions, Value,
+};
 use femp_prop::compare::Normalized;
 use femp_prop::describe::{describe, first_difference};
 use femp_prop::regress::{Recorded, Regression, Store};
@@ -112,7 +115,7 @@ impl Replayer<'_> {
                         .filter(|contract| contract.runnable().is_some())
                         .count()
             }),
-            Entry::Machine(_) => None,
+            Entry::Machine(_) | Entry::Storage(_) => None,
         };
         let (entry_name, judged, outcomes) = match (found.plan.entry, &found.case) {
             (Entry::Property(_) | Entry::Contract(_), ReplayCase::Args(values))
@@ -220,11 +223,120 @@ impl Replayer<'_> {
         Ok(())
     }
 
+    /// Sends each sequence that breaks a contract's invariants to the
+    /// compiled contract. The proof found it among transactions that are
+    /// all accepted, so a rejected one means the model and the contract
+    /// disagree. The invariants read storage the EVM does not expose, so
+    /// the replay confirms the transactions, not the broken invariant.
+    pub fn replay_contracts(&self, module: &Module, found: Vec<Found<'_>>) -> Result<()> {
+        let cx = self.inputs.context(Default::default());
+        let Some(platform) = self
+            .platforms
+            .iter()
+            .find(|platform| module.platform() == Some(platform.id()))
+        else {
+            return Ok(());
+        };
+        let label = platform.id().to_string();
+        let out_dir = cx
+            .project
+            .root
+            .join(BUILD_DIR)
+            .join("prove")
+            .join(REPLAY_DIR)
+            .join(&label)
+            .join(&module.name);
+        for item in found {
+            let (Some(machine), ReplayCase::Sequence(sequence)) = (&item.plan.machine, &item.case)
+            else {
+                continue;
+            };
+            let transactions = transactions(machine, &item.plan.selectors, sequence);
+            console::step("Replaying", &format!("{} [{label}]", machine.name));
+            let deliveries = match platform.run_contract(&cx, module, &transactions, &out_dir) {
+                Ok(deliveries) => deliveries,
+                Err(error) => {
+                    let error = module.compiler_error(error);
+                    item.report
+                        .notes
+                        .push(format!("not replayed on {label}: {error}"));
+                    continue;
+                }
+            };
+            let rejected =
+                deliveries
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, delivery)| match delivery {
+                        Delivery::Rejected(outcome) => Some((index, outcome.clone())),
+                        Delivery::Accepted => None,
+                    });
+            let ClaimStatus::Refuted(refuted) = &mut item.report.status else {
+                continue;
+            };
+            let outcome = match &rejected {
+                None => "accepts every transaction".to_string(),
+                Some((0, outcome)) => format!("rejects the deployment: {outcome}"),
+                Some((step, outcome)) => format!(
+                    "rejects step {step} (`{}`): {outcome}",
+                    transactions.calls[step - 1].name
+                ),
+            };
+            refuted.replay = vec![Replay {
+                target: label.clone(),
+                outcome,
+            }];
+            if rejected.is_some() {
+                item.report.notes.push(
+                    "the compiled targets do not reproduce this counterexample: the proof model and the compiled code disagree"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Whether the replay disagreed with the proof.
     pub fn disagrees(report: &ClaimReport) -> bool {
         report
             .notes
             .iter()
             .any(|note| note.contains("do not reproduce"))
+    }
+}
+
+/// A contract's refuting sequence as transactions: each handler takes its
+/// context fields first, which the transaction runs in.
+fn transactions(machine: &Machine, selectors: &[Option<u32>], sequence: &Sequence) -> Transactions {
+    let transaction = |method: &Method, selector: Option<u32>, values: &[Value]| {
+        let mut transaction = Transaction {
+            selector,
+            name: method.name.clone(),
+            args: Vec::new(),
+            context: Vec::new(),
+        };
+        for (param, value) in method.params.iter().zip(values) {
+            if param.name.starts_with("ctx.") {
+                transaction.context.push((param.name.clone(), *value));
+            } else {
+                transaction.args.push(*value);
+            }
+        }
+        transaction
+    };
+    Transactions {
+        contract: machine.name.clone(),
+        deploy: transaction(&machine.init, None, &sequence.init),
+        calls: sequence
+            .steps
+            .iter()
+            .map(|step| {
+                transaction(
+                    &machine.commands[step.command].method,
+                    selectors.get(step.command).copied().flatten(),
+                    &step.args,
+                )
+            })
+            .collect(),
     }
 }

@@ -68,10 +68,17 @@ fn relativize(claims: &mut Claims, root: &Path) {
         contract.location.file = relative(&contract.location.file, root);
         contract.target.location.file = relative(&contract.target.location.file, root);
     }
+    for claim in &mut claims.storage {
+        claim.location.file = relative(&claim.location.file, root);
+        for invariant in &mut claim.invariants {
+            invariant.location.file = relative(&invariant.location.file, root);
+        }
+    }
 }
 
-/// Lists every claim: properties and differentials, machines, then specs.
-/// Property testing lists the specs it can run; proving lists them all.
+/// Lists every claim: properties and differentials, machines, specs, then
+/// contracts. Property testing lists the specs it can run; proving lists
+/// them all, and the contracts it proves.
 pub fn list(found: &[(&Module, Claims)], all_specs: bool) {
     for (module, claims) in found {
         let line = |name: &str, kind: &str, location: &dyn std::fmt::Display| {
@@ -91,6 +98,11 @@ pub fn list(found: &[(&Module, Claims)], all_specs: bool) {
         for contract in &claims.contracts {
             if all_specs || contract.runnable().is_some() {
                 line(&contract.name, "spec", &contract.location);
+            }
+        }
+        if all_specs {
+            for claim in &claims.storage {
+                line(&claim.name, "contract", &claim.location);
             }
         }
     }
