@@ -6,7 +6,8 @@
 // sum_to: f5
 // third: f6
 // width: f7
-// bump: not supported: src/lib.fe:77: mutable borrows are not supported yet
+// bump: f9
+// greeting: not supported: src/lib.fe:85: values of type `String<5>` are not supported
 target native
 type t0 Pair = struct { low: u8, high: u8 }
 type t1 Shape = enum { Dot, Line(u64), Box(u64, u64) }
@@ -143,6 +144,41 @@ bb1:
   v0: u64 = v1  @src/lib.fe:68
   return v0  @src/lib.fe:67
 
-f9 bump() -> ()  @src/lib.fe:75
+f9 bump(v0: Pair) -> u8  @src/lib.fe:75
+  slot s0: Pair
+bb0:
+  goto bb1()
+bb1:
+  v1: Pair = v0  @src/lib.fe:76
+  v2: Pair = v1  @src/lib.fe:76
+  store s0 = v2  @src/lib.fe:76
+  v3: Pair = load s0  @src/lib.fe:77
+  v4: Pair = load s0
+  v6: ((), Pair) = call f10(v4)  @src/lib.fe:77
+  v5: () = v6.0  @src/lib.fe:77
+  v7: Pair = v6.1  @src/lib.fe:77
+  store s0 = v7  @src/lib.fe:77
+  v8: u8 = load s0.1  @src/lib.fe:78
+  return v8  @src/lib.fe:75
+
+f10 grow(v0: Pair) -> ((), Pair)  @src/lib.fe:81
+  slot s0: Pair
+bb0:
+  store s0 = v0  @src/lib.fe:81
+  goto bb1()
+bb1:
+  v1: u8 = load s0.1  @src/lib.fe:82
+  v3: u8 = 1  @src/lib.fe:82
+  v2: u8 = v3  @src/lib.fe:82
+  v4: u8 = add.checked v1, v2  @src/lib.fe:82
+  store s0.1 = v4  @src/lib.fe:82
+  v6: () = ()
+  v5: () = v6
+  v7: () = ()  @src/lib.fe:81
+  v8: Pair = load s0  @src/lib.fe:81
+  v9: ((), Pair) = make ((), Pair) {v7, v8}  @src/lib.fe:81
+  return v9  @src/lib.fe:81
+
+f11 greeting() -> ()  @src/lib.fe:85
 bb0:
   unreachable

@@ -54,6 +54,10 @@ impl<'a> Sorts<'a> {
                 }
             }
             Type::Array { elem, .. } => self.note(elem),
+            Type::Map { key, value } => {
+                self.note(key);
+                self.note(value);
+            }
             Type::Bool | Type::Unit | Type::Adt(_) => {}
         }
     }
@@ -73,6 +77,9 @@ impl<'a> Sorts<'a> {
             Type::Tuple(items) => format!("Tup{}", self.tuple_index(items)),
             Type::Adt(id) => format!("T{}", id.0),
             Type::Array { elem, .. } => format!("(Array Int {})", self.sort(elem)),
+            Type::Map { key, value } => {
+                format!("(Array {} {})", self.sort(key), self.sort(value))
+            }
         }
     }
 
@@ -127,6 +134,11 @@ impl<'a> Sorts<'a> {
                     "(forall ((i Int)) (=> (and (<= 0 i) (< i {len})) {body}))"
                 ))
             }
+            // Keys no one wrote hold zero, so every entry is well formed.
+            Type::Map { key, value } => {
+                let body = self.wf(value, &format!("(select {term} k)"))?;
+                Some(format!("(forall ((k {})) {body})", self.sort(key)))
+            }
         }
     }
 
@@ -158,6 +170,7 @@ impl<'a> Sorts<'a> {
             Type::Int { .. } => true,
             Type::Tuple(items) => items.iter().any(|item| self.needs_wf(item)),
             Type::Array { elem, .. } => self.needs_wf(elem),
+            Type::Map { value, .. } => self.needs_wf(value),
             Type::Adt(id) => match self.table.get(*id) {
                 TypeDef::Struct { fields, .. } => fields.iter().any(|f| self.needs_wf(&f.ty)),
                 TypeDef::Enum { variants, .. } => variants
@@ -171,40 +184,15 @@ impl<'a> Sorts<'a> {
     /// the well-formedness predicates of datatypes, dependencies first.
     pub fn declarations(&self) -> String {
         let mut out = String::new();
-        let mut names = vec!["(Unit 0)".to_string()];
-        let mut bodies = vec!["((Unit.mk))".to_string()];
-        for (index, items) in self.tuples.iter().enumerate() {
-            let ty = Type::Tuple(items.clone());
-            names.push(format!("(Tup{index} 0)"));
-            bodies.push(format!("({})", self.product(&ty, None, items)));
+        // One declaration per datatype, after the ones it contains: a
+        // datatype may not index an array by one declared with it.
+        let mut nodes = vec![Node::Unit];
+        nodes.extend((0..self.tuples.len()).map(Node::Tuple));
+        nodes.extend(self.table.ids().map(Node::Adt));
+        let mut declared = BTreeSet::new();
+        for node in nodes {
+            self.declare(node, &mut declared, &mut out);
         }
-        for id in self.table.ids() {
-            let ty = Type::Adt(id);
-            names.push(format!("(T{} 0)", id.0));
-            let body = match self.table.get(id) {
-                TypeDef::Struct { fields, .. } => {
-                    let fields: Vec<Type> = fields.iter().map(|field| field.ty.clone()).collect();
-                    format!("({})", self.product(&ty, None, &fields))
-                }
-                TypeDef::Enum { variants, .. } => {
-                    let variants: Vec<String> = variants
-                        .iter()
-                        .enumerate()
-                        .map(|(index, variant)| {
-                            self.product(&ty, Some(index as u16), &variant.fields)
-                        })
-                        .collect();
-                    format!("({})", variants.join(" "))
-                }
-            };
-            bodies.push(body);
-        }
-        let _ = writeln!(
-            out,
-            "(declare-datatypes ({}) ({}))",
-            names.join(" "),
-            bodies.join(" ")
-        );
         for (bits, signed) in &self.ints {
             let ty = Type::Int {
                 bits: *bits,
@@ -224,6 +212,71 @@ impl<'a> Sorts<'a> {
             self.define_wf(id, &mut done, &mut out);
         }
         out
+    }
+
+    fn declare(&self, node: Node, declared: &mut BTreeSet<Node>, out: &mut String) {
+        if !declared.insert(node) {
+            return;
+        }
+        let (name, ty, parts) = match node {
+            Node::Unit => ("Unit".to_string(), Type::Unit, Vec::new()),
+            Node::Tuple(index) => {
+                let items = self.tuples[index].clone();
+                (
+                    format!("Tup{index}"),
+                    Type::Tuple(items.clone()),
+                    vec![(None, items)],
+                )
+            }
+            Node::Adt(id) => {
+                let parts = match self.table.get(id) {
+                    TypeDef::Struct { fields, .. } => {
+                        vec![(None, fields.iter().map(|field| field.ty.clone()).collect())]
+                    }
+                    TypeDef::Enum { variants, .. } => variants
+                        .iter()
+                        .enumerate()
+                        .map(|(index, variant)| (Some(index as u16), variant.fields.clone()))
+                        .collect(),
+                };
+                (format!("T{}", id.0), Type::Adt(id), parts)
+            }
+        };
+        for (_, fields) in &parts {
+            for field in fields {
+                for dependency in self.contained(field) {
+                    self.declare(dependency, declared, out);
+                }
+            }
+        }
+        let body = match node {
+            Node::Unit => "((Unit.mk))".to_string(),
+            _ => format!(
+                "({})",
+                parts
+                    .iter()
+                    .map(|(variant, fields)| self.product(&ty, *variant, fields))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        };
+        let _ = writeln!(out, "(declare-datatypes (({name} 0)) ({body}))");
+    }
+
+    /// The datatypes a field's sort names.
+    fn contained(&self, ty: &Type) -> Vec<Node> {
+        match ty {
+            Type::Bool | Type::Int { .. } => Vec::new(),
+            Type::Unit => vec![Node::Unit],
+            Type::Tuple(items) => vec![Node::Tuple(self.tuple_index(items))],
+            Type::Adt(id) => vec![Node::Adt(*id)],
+            Type::Array { elem, .. } => self.contained(elem),
+            Type::Map { key, value } => {
+                let mut nodes = self.contained(key);
+                nodes.extend(self.contained(value));
+                nodes
+            }
+        }
     }
 
     fn product(&self, ty: &Type, variant: Option<u16>, fields: &[Type]) -> String {
@@ -288,6 +341,14 @@ impl<'a> Sorts<'a> {
     }
 }
 
+/// A datatype the encoding declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Node {
+    Unit,
+    Tuple(usize),
+    Adt(TypeId),
+}
+
 /// The structs and enums a type's values contain, directly or nested.
 fn collect_adts(table: &TypeTable, ty: &Type, out: &mut Vec<TypeId>) {
     match ty {
@@ -317,6 +378,10 @@ fn collect_adts(table: &TypeTable, ty: &Type, out: &mut Vec<TypeId>) {
             }
         }
         Type::Array { elem, .. } => collect_adts(table, elem, out),
+        Type::Map { key, value } => {
+            collect_adts(table, key, out);
+            collect_adts(table, value, out);
+        }
         Type::Bool | Type::Int { .. } | Type::Unit => {}
     }
 }

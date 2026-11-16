@@ -28,7 +28,8 @@ impl Expr {
             | Self::Cast { value, .. }
             | Self::IsVariant { value, .. }
             | Self::Tag { value }
-            | Self::Repeat { value, .. } => out.push(value),
+            | Self::Repeat { value, .. }
+            | Self::Fill { value } => out.push(value),
             Self::Binary { lhs, rhs, .. } => {
                 out.push(lhs);
                 out.push(rhs);
@@ -60,7 +61,8 @@ impl Expr {
             | Self::Cast { value, .. }
             | Self::IsVariant { value, .. }
             | Self::Tag { value }
-            | Self::Repeat { value, .. } => out.push(value),
+            | Self::Repeat { value, .. }
+            | Self::Fill { value } => out.push(value),
             Self::Binary { lhs, rhs, .. } => {
                 out.push(lhs);
                 out.push(rhs);

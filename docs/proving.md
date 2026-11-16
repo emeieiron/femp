@@ -122,6 +122,18 @@ fn claims_stay_within_total(store: VestingStore) -> bool {
 ```
 
 When a module declares several contracts, `#[invariant(contract = "Name")]` says which one.
+
+A parameter that is not a field ranges over every value of its type, so an invariant can speak
+of every entry of a `StorageMap`:
+
+```fe
+/// No account ever holds more than the cap.
+#[invariant]
+fn balances_stay_under_the_cap(store: TokenStore, account: Address) -> bool {
+    store.balances.get(key: account) <= CAP
+}
+```
+
 The contract is proved as a machine whose state is its storage:
 
 - A new contract's storage is zero: `0`, `false` and an enum's first variant. `init` runs on it
@@ -134,6 +146,14 @@ The contract is proved as a machine whose state is its storage:
   not `#[payable]`. Reads that change during a transaction, such as `gas` or another account's
   balance, are any value at each read.
 - `log.emit` leaves storage alone.
+- A `StorageMap` holds a value for every key, zero until it is written; `get`, `set`, `remove`
+  and `map[key]` read and write it.
+- An invariant with parameters beyond the fields is assumed, before each message, at the value
+  it is checked at afterwards and at every value of a parameter's type the message carries,
+  `ctx.caller` included: those name the entries a message can touch. It holds for every value of
+  them, which a proof establishes, but an induction that needs other entries comes back unknown.
+- An `Address` is chosen as the 160-bit number it holds, as are `ctx.caller`, `ctx.origin`,
+  `ctx.address` and `ctx.coinbase`.
 
 If induction fails, a bounded search from deployment looks for a sequence of up to `--steps`
 messages, in which block time and number never decrease. A sequence it finds refutes the
@@ -233,12 +253,15 @@ package manager.
 
 ## Limits
 
-- Values are integers, `bool`, structs, enums, tuples and arrays. Mutable borrows, raw
-  pointers, strings and recursion are reported as not supported.
-- Effects are modeled where a contract provides them: its storage, the EVM context, and values
-  bound with `with`. Only `init` and `recv` arms may write storage.
-- A contract's messages and `init` may take only integers and `bool`. Storage maps, calls to
-  other contracts, creating contracts and raw storage access are not supported yet.
+- Values are integers, `bool`, structs, enums, tuples, arrays and storage maps. A mutable
+  borrow is lent to the function it is passed to, which hands the value back; a function that
+  returns a mutable borrow is not supported. Raw pointers, strings and recursion are reported as
+  not supported.
+- Effects are modeled where a contract provides them: its storage, which any function it is
+  passed to may write, the EVM context, and values bound with `with`.
+- A contract's messages, `init` and invariants may range over integers, `bool` and `Address`
+  only. Calls to other contracts, creating contracts and raw storage access are not supported
+  yet. An invariant cannot sum a map's entries.
 - A replayed sequence cannot choose `ctx.address`, `ctx.origin`, `ctx.selfbalance` or
   `ctx.blobbasefee`, which the EVM decides.
 - Machines whose methods use effects, such as machines that deploy contracts, are not

@@ -1,5 +1,6 @@
 //! Fe types as VIR types. Views and shared borrows read a value that cannot
-//! change while they live, so they lower to the value's own type.
+//! change while they live, and a mutable borrow is written back to its
+//! place by the body lowering, so all of them lower to the value's type.
 
 use std::collections::HashMap;
 
@@ -10,7 +11,7 @@ use hir::analysis::ty::adt_def::AdtRef;
 use hir::analysis::ty::ty_def::{CapabilityKind, PrimTy, TyId};
 use hir::hir_def::{EnumVariant, Partial};
 
-use crate::lower::evm::{CONTEXT, is_evm};
+use crate::lower::evm::{CONTEXT, is_evm, is_storage_map};
 
 pub(crate) struct Types<'db> {
     pub table: TypeTable,
@@ -56,13 +57,9 @@ impl<'db> Types<'db> {
         if let Some((kind, target)) = ty.as_capability(db) {
             return match kind {
                 CapabilityKind::View | CapabilityKind::Ref => self.lower(db, instance, target),
-                // The modeled context cannot change, so a mutable borrow of it
-                // is the context itself.
-                CapabilityKind::Mut if is_evm(db, target) => self.lower(db, instance, target),
-                CapabilityKind::Mut => Err(format!(
-                    "`{}` is a mutable borrow, which the prover does not support yet",
-                    ty.pretty_print(db)
-                )),
+                // A mutable borrow holds the value its place holds; the body
+                // lowering writes it back where it came from.
+                CapabilityKind::Mut => self.lower(db, instance, target),
             };
         }
         if let Some(prim) = ty.as_prim(db) {
@@ -70,6 +67,16 @@ impl<'db> Types<'db> {
         }
         if is_evm(db, ty) {
             return Ok(self.evm());
+        }
+        if is_storage_map(db, ty) {
+            let args = ty.generic_args(db).to_vec();
+            let [key, value] = args.as_slice() else {
+                return Err("a storage map without a key and a value type".to_string());
+            };
+            return Ok(Type::Map {
+                key: Box::new(self.lower(db, instance, *key)?),
+                value: Box::new(self.lower(db, instance, *value)?),
+            });
         }
         if let Some(def) = ty.adt_def(db) {
             let name = ty.pretty_print(db).to_string();
@@ -201,18 +208,12 @@ impl<'db> Types<'db> {
                     len,
                 }
             }
-            PrimTy::View | PrimTy::BorrowRef => {
+            PrimTy::View | PrimTy::BorrowRef | PrimTy::BorrowMut => {
                 let inner = *ty
                     .generic_args(db)
                     .first()
                     .ok_or_else(|| "a borrow without a target type".to_string())?;
                 self.lower(db, instance, inner)?
-            }
-            PrimTy::BorrowMut => {
-                return Err(format!(
-                    "`{}` is a mutable borrow, which the prover does not support yet",
-                    ty.pretty_print(db)
-                ));
             }
             PrimTy::String | PrimTy::Ptr(_) => {
                 return Err(format!(

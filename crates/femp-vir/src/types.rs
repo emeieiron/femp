@@ -20,6 +20,13 @@ pub enum Type {
         elem: Box<Type>,
         len: usize,
     },
+    /// A total map from keys to values, such as a contract's storage map:
+    /// every key has an entry, zero until it is written. Its entries are
+    /// projected with an index of the key's type.
+    Map {
+        key: Box<Type>,
+        value: Box<Type>,
+    },
 }
 
 impl Type {
@@ -45,6 +52,10 @@ impl Type {
             Self::Array { elem, len } => Self::Array {
                 elem: Box::new(elem.shifted(offset)),
                 len: *len,
+            },
+            Self::Map { key, value } => Self::Map {
+                key: Box::new(key.shifted(offset)),
+                value: Box::new(value.shifted(offset)),
             },
             Self::Bool | Self::Int { .. } | Self::Unit => self.clone(),
         }
@@ -193,6 +204,12 @@ impl fmt::Display for TypeName<'_> {
             }
             Type::Adt(id) => f.write_str(self.table.get(*id).name()),
             Type::Array { elem, len } => write!(f, "[{}; {len}]", self.table.display(elem)),
+            Type::Map { key, value } => write!(
+                f,
+                "map[{} => {}]",
+                self.table.display(key),
+                self.table.display(value)
+            ),
         }
     }
 }

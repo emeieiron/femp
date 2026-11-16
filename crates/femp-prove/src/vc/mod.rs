@@ -132,6 +132,7 @@ fn int_types(ty: &Type) -> Vec<(u16, bool)> {
         Type::Int { bits, signed } => vec![(*bits, *signed)],
         Type::Tuple(items) => items.iter().flat_map(int_types).collect(),
         Type::Array { elem, .. } => int_types(elem),
+        Type::Map { key, value } => int_types(key).into_iter().chain(int_types(value)).collect(),
         Type::Bool | Type::Unit | Type::Adt(_) => Vec::new(),
     }
 }

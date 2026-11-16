@@ -103,6 +103,11 @@ impl Terms<'_> {
                     name(*value)
                 )]));
             }
+            Expr::Fill { value } => format!(
+                "((as const {}) {})",
+                self.sorts.sort(self.ty(dst)),
+                name(*value)
+            ),
             Expr::Intrinsic { op, args } => self.intrinsic(dst, *op, args)?,
             Expr::Havoc => return Ok(Definition::Arbitrary),
             Expr::Apply {
@@ -181,8 +186,8 @@ impl Terms<'_> {
                     )
                 }
                 Proj::Index(index) => match &ty {
-                    Type::Array { elem, .. } => (
-                        (**elem).clone(),
+                    Type::Array { elem: item, .. } | Type::Map { value: item, .. } => (
+                        (**item).clone(),
                         format!("(select {term} {})", Self::index(index)),
                     ),
                     _ => return Err(internal("an index into a non-array")),
@@ -235,7 +240,7 @@ impl Terms<'_> {
                 }
             }
             Proj::Index(index) => {
-                let Type::Array { elem, .. } = &ty else {
+                let (Type::Array { elem, .. } | Type::Map { value: elem, .. }) = &ty else {
                     return Err(internal("an index into a non-array"));
                 };
                 let at = Self::index(index);

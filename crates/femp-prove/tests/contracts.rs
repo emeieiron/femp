@@ -11,8 +11,10 @@ use femp_core::property::Location;
 use femp_prove::obligation::machine::{self, ContractHandler};
 use femp_prove::{Config, Dumps, Task, Verdict};
 
-fn ledger() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../femp-compiler/tests/fixtures/ledger")
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../femp-compiler/tests/fixtures")
+        .join(name)
 }
 
 fn solver() -> Option<PathBuf> {
@@ -34,11 +36,12 @@ struct Proof {
     search: Option<(usize, Verdict, femp_core::property::Machine)>,
 }
 
-fn prove(invariant: &str, config: &Config) -> Proof {
-    let session = Session::open(&ledger(), Target::Evm).unwrap_or_else(|error| panic!("{error}"));
+fn prove(fixture_name: &str, name: &str, invariant: &str, config: &Config) -> Proof {
+    let dir = fixture(fixture_name);
+    let session = Session::open(&dir, Target::Evm).unwrap_or_else(|error| panic!("{error}"));
     let root = ContractRoot {
         path: Vec::new(),
-        name: "Ledger".to_string(),
+        name: name.to_string(),
         invariants: vec![Root::function(&[], invariant)],
     };
     let lowered = session.lower_with(&[], &[root]);
@@ -54,16 +57,20 @@ fn prove(invariant: &str, config: &Config) -> Proof {
     }
     let arms: Vec<ContractHandler<'_>> = contract.arms.iter().map(handler).collect();
     let location = Location {
-        file: ledger().join("src/lib.fe"),
+        file: dir.join("src/lib.fe"),
         line: 1,
     };
     let (declared, fns) = machine::contract_machine(
-        "Ledger",
+        name,
         &[],
         location,
         handler(&contract.init),
         &arms,
-        &[(invariant, contract.invariants[0])],
+        &[(
+            invariant,
+            &contract.invariants[0].params,
+            contract.invariants[0].func,
+        )],
     );
     let program = &lowered.program;
     let run = |task: Task| femp_prove::prove(task, config, &Dumps::default()).verdict;
@@ -74,7 +81,7 @@ fn prove(invariant: &str, config: &Config) -> Proof {
             (declared.commands[command].method.name.clone(), run(task))
         })
         .collect();
-    let search = (1..=3).find_map(|steps| {
+    let search = (1..=4).find_map(|steps| {
         let task = machine::search_task(program, &fns, &declared, steps).unwrap();
         match run(task) {
             verdict @ Verdict::Refuted(_) => Some((steps, verdict, declared.clone())),
@@ -102,7 +109,7 @@ fn proves_an_invariant_every_message_keeps() {
     let Some(config) = config() else {
         return;
     };
-    let proof = prove("within_cap", &config);
+    let proof = prove("ledger", "Ledger", "within_cap", &config);
     assert!(proof.init.is_proved(), "{:?}", proof.init);
     for (name, verdict) in &proof.steps {
         assert!(verdict.is_proved(), "{name}: {verdict:?}");
@@ -114,7 +121,7 @@ fn refutes_an_invariant_with_a_sequence_of_messages() {
     let Some(config) = config() else {
         return;
     };
-    let proof = prove("below_hundred", &config);
+    let proof = prove("ledger", "Ledger", "below_hundred", &config);
     assert!(proof.init.is_proved(), "{:?}", proof.init);
     let deposit = proof
         .steps
@@ -133,4 +140,40 @@ fn refutes_an_invariant_with_a_sequence_of_messages() {
     assert!(sequence.init[0].bits() >= femp_core::property::U256::from(100u8));
     let step = &sequence.steps[0];
     assert_eq!(declared.commands[step.command].method.name, "Deposit");
+}
+
+#[test]
+fn proves_an_invariant_of_every_account_in_a_map() {
+    let Some(config) = config() else {
+        return;
+    };
+    let proof = prove("token", "Token", "balances_stay_under_the_cap", &config);
+    assert!(proof.init.is_proved(), "{:?}", proof.init);
+    for (name, verdict) in &proof.steps {
+        assert!(verdict.is_proved(), "{name}: {verdict:?}");
+    }
+}
+
+#[test]
+fn refutes_a_bound_the_owner_can_mint_past() {
+    let Some(config) = config() else {
+        return;
+    };
+    let proof = prove("token", "Token", "supply_stays_small", &config);
+    let (steps, verdict, declared) = proof.search.expect("a sequence from deployment");
+    let Verdict::Refuted(refutation) = verdict else {
+        unreachable!()
+    };
+    let sequence = machine::decode(&declared, steps, &refutation.values).unwrap();
+    assert_eq!(steps, 1);
+    let step = &sequence.steps[0];
+    let mint = &declared.commands[step.command].method;
+    assert_eq!(mint.name, "Mint");
+    // Only the owner, who deployed the contract, may mint.
+    let caller = mint
+        .params
+        .iter()
+        .position(|param| param.name == "ctx.caller")
+        .unwrap();
+    assert_eq!(step.args[caller], sequence.init[0]);
 }

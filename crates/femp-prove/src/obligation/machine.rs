@@ -18,7 +18,7 @@ use femp_vir::{
     ValueId,
 };
 
-use super::inputs::{assume_domain, choose};
+use super::inputs::{assume_domain, choose, vir_type};
 use crate::task::{Input, Task};
 
 /// The functions of a machine's methods in a lowered program.
@@ -158,18 +158,57 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Arguments for an invariant's parameters other than the state, which
+    /// it holds for every value of: inputs a counterexample reports, or any
+    /// values, unreported.
+    fn every(
+        &mut self,
+        block: femp_vir::BlockId,
+        method: &Method,
+        report: bool,
+    ) -> Result<Vec<ValueId>, String> {
+        let mut cursor = Cursor::new(&mut self.entry, block);
+        if report {
+            return choose(
+                &mut cursor,
+                &method.params,
+                &mut self.inputs,
+                &mut self.assumed,
+            );
+        }
+        Ok(method
+            .params
+            .iter()
+            .map(|param| cursor.havoc(vir_type(param.ty), Some(param.name.clone())))
+            .collect())
+    }
+
     /// Asserts every invariant of `state`, and calls every observation so
     /// that a panicking one fails too. In an assumed block, the invariants
-    /// are assumed instead.
-    fn check(&mut self, block: femp_vir::BlockId, state: ValueId, after: &str) {
+    /// are assumed instead. An invariant with parameters is checked at the
+    /// arguments `at` gives it, or at new ones.
+    fn check(
+        &mut self,
+        block: femp_vir::BlockId,
+        state: ValueId,
+        after: &str,
+        at: Option<&[Vec<ValueId>]>,
+    ) -> Result<(), String> {
         let assumed = self.entry.block(block).mode == Mode::Assumed;
-        let invariants: Vec<(FuncId, String)> = self
+        let mut invariants: Vec<(FuncId, String, Vec<ValueId>)> = Vec::new();
+        for (index, (func, method)) in self
             .fns
             .invariants
             .iter()
             .zip(&self.machine.invariants)
-            .map(|(func, method)| (*func, method.name.clone()))
-            .collect();
+            .enumerate()
+        {
+            let args = match at {
+                Some(at) => at[index].clone(),
+                None => self.every(block, method, !assumed)?,
+            };
+            invariants.push((*func, method.name.clone(), args));
+        }
         let observations: Vec<(FuncId, Type)> = self
             .fns
             .observations
@@ -177,8 +216,10 @@ impl<'a> Builder<'a> {
             .map(|func| (*func, self.result(*func)))
             .collect();
         let mut cursor = self.cursor(block);
-        for (func, name) in invariants {
-            let holds = cursor.call(func, vec![state], Type::Bool);
+        for (func, name, args) in invariants {
+            let mut call_args = vec![state];
+            call_args.extend(args);
+            let holds = cursor.call(func, call_args, Type::Bool);
             if assumed {
                 cursor.assume(holds);
             } else {
@@ -191,6 +232,7 @@ impl<'a> Builder<'a> {
         for (func, ty) in observations {
             cursor.call(func, vec![state], ty);
         }
+        Ok(())
     }
 
     fn finish(mut self, block: femp_vir::BlockId) -> Task {
@@ -216,7 +258,7 @@ pub fn init_task(program: &Program, fns: &MachineFns, machine: &Machine) -> Resu
     );
     let block = builder.entry.entry;
     let (state, block) = builder.init(block)?;
-    builder.check(block, state, &format!("`{}`", machine.init.name));
+    builder.check(block, state, &format!("`{}`", machine.init.name), None)?;
     Ok(builder.finish(block))
 }
 
@@ -244,39 +286,53 @@ pub fn step_task(
         value: state,
         domain: None,
     });
+    let chosen = {
+        let mut cursor = Cursor::new(&mut builder.entry, first);
+        choose(
+            &mut cursor,
+            &method.params,
+            &mut builder.inputs,
+            &mut builder.assumed,
+        )?
+    };
+    // Where each invariant is checked after the command.
+    let mut at = Vec::new();
+    for invariant in &machine.invariants {
+        at.push(builder.every(first, invariant, true)?);
+    }
     // The hypothesis: the invariants hold of the arbitrary state, which is
-    // also one they can be evaluated on without panicking.
+    // also one they can be evaluated on without panicking. One with
+    // parameters is assumed where it is checked, and at every value of a
+    // parameter's type the command receives.
     let hypothesis = builder.entry.new_block();
     builder.entry.block_mut(hypothesis).mode = Mode::Assumed;
     let body = builder.entry.new_block();
     builder
         .cursor(first)
         .terminate(Terminator::Goto(Succ::to(hypothesis)));
-    let invariants = fns.invariants.clone();
     let mut holds = Vec::new();
     {
         let mut cursor = builder.cursor(hypothesis);
-        for func in &invariants {
-            holds.push(cursor.call(*func, vec![state], Type::Bool));
+        for ((func, invariant), checked) in fns.invariants.iter().zip(&machine.invariants).zip(&at)
+        {
+            for instance in instances(invariant, checked, &method.params, &chosen) {
+                let mut args = vec![state];
+                args.extend(instance);
+                holds.push(cursor.call(*func, args, Type::Bool));
+            }
         }
         cursor.terminate(Terminator::Goto(Succ::to(body)));
     }
-    let args = {
+    {
         let mut cursor = Cursor::new(&mut builder.entry, body);
         for held in holds {
             cursor.assume(held);
         }
-        let mut args = vec![state];
-        args.extend(choose(
-            &mut cursor,
-            &method.params,
-            &mut builder.inputs,
-            &mut builder.assumed,
-        )?);
-        args
-    };
+    }
+    let mut args = vec![state];
+    args.extend(chosen);
     let (next, after) = builder.run(body, fns.commands[command], args, state_ty);
-    builder.check(after, next, &format!("`{}`", method.name));
+    builder.check(after, next, &format!("`{}`", method.name), Some(&at))?;
     Ok(builder.finish(after))
 }
 
@@ -301,7 +357,7 @@ pub fn search_task(
     builder.entry.block_mut(block).mode = mode(steps > 0);
     let (mut state, after) = builder.init(block)?;
     block = after;
-    builder.check(block, state, &format!("`{}`", machine.init.name));
+    builder.check(block, state, &format!("`{}`", machine.init.name), None)?;
     let count = machine.commands.len();
     let choice_ty = Ty::Uint(32);
     let state_ty = builder.state.clone();
@@ -375,11 +431,49 @@ pub fn search_task(
             }));
             block = rest;
         }
-        builder.check(join, next, &format!("step {step}"));
+        builder.check(join, next, &format!("step {step}"), None)?;
         block = join;
         state = next;
     }
     Ok(builder.finish(block))
+}
+
+/// Most instances of an invariant's hypothesis an induction step assumes.
+const MAX_INSTANCES: usize = 32;
+
+/// Where an invariant with parameters is assumed before a command: at the
+/// arguments it is checked at afterwards, and at every argument of the
+/// command that has a parameter's type, since those name the parts of the
+/// state the command can touch.
+fn instances(
+    invariant: &Method,
+    checked: &[ValueId],
+    params: &[Param],
+    args: &[ValueId],
+) -> Vec<Vec<ValueId>> {
+    let mut instances: Vec<Vec<ValueId>> = vec![Vec::new()];
+    for (param, at) in invariant.params.iter().zip(checked) {
+        let mut candidates = vec![*at];
+        candidates.extend(
+            params
+                .iter()
+                .zip(args)
+                .filter(|(other, _)| other.ty == param.ty)
+                .map(|(_, value)| *value),
+        );
+        instances = instances
+            .into_iter()
+            .flat_map(|prefix| {
+                candidates.iter().map(move |candidate| {
+                    let mut next = prefix.clone();
+                    next.push(*candidate);
+                    next
+                })
+            })
+            .take(MAX_INSTANCES)
+            .collect();
+    }
+    instances
 }
 
 fn mode(assumed: bool) -> Mode {
@@ -439,7 +533,7 @@ pub fn contract_machine(
     location: Location,
     init: ContractHandler<'_>,
     arms: &[ContractHandler<'_>],
-    invariants: &[(&str, FuncId)],
+    invariants: &[(&str, &[Param], FuncId)],
 ) -> (Machine, MachineFns) {
     let method = |name: &str, params: &[Param]| Method {
         name: name.to_string(),
@@ -460,7 +554,7 @@ pub fn contract_machine(
             .collect(),
         invariants: invariants
             .iter()
-            .map(|(name, _)| method(name, &[]))
+            .map(|(name, params, _)| method(name, params))
             .collect(),
         observations: Vec::new(),
         steps: "1..=16".to_string(),
@@ -471,7 +565,7 @@ pub fn contract_machine(
     let fns = MachineFns {
         init: init.func,
         commands: arms.iter().map(|arm| arm.func).collect(),
-        invariants: invariants.iter().map(|(_, func)| *func).collect(),
+        invariants: invariants.iter().map(|(_, _, func)| *func).collect(),
         observations: Vec::new(),
         reverts: true,
     };

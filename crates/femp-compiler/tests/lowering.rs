@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use femp_compiler::{Root, Session, Target};
 
-const ROOTS: [(&str, Option<&str>); 9] = [
+const ROOTS: [(&str, Option<&str>); 10] = [
     ("ignores", None),
     ("spread", Some("Pair")),
     ("wraps", None),
@@ -15,6 +15,7 @@ const ROOTS: [(&str, Option<&str>); 9] = [
     ("third", None),
     ("width", None),
     ("bump", None),
+    ("greeting", None),
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -90,11 +91,11 @@ fn targets_differ_where_the_code_does() {
 fn reports_what_it_cannot_lower_with_its_location() {
     let text = lowered("evm");
     assert!(
-        text.contains(
-            "// bump: not supported: src/lib.fe:77: mutable borrows are not supported yet"
-        ),
+        text.contains("// greeting: not supported: src/lib.fe:85: values of type"),
         "{text}"
     );
+    // A mutable borrow is lent to the callee and written back.
+    assert!(text.contains("// bump: f"), "{text}");
 }
 
 #[test]

@@ -81,3 +81,7 @@ pub fn bump(_ start: Pair) -> u8 {
 fn grow(_ pair: mut Pair) {
     pair.high = pair.high + 1
 }
+
+pub fn greeting() -> String<5> {
+    "hello"
+}

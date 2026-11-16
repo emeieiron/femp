@@ -169,6 +169,10 @@ the storage, and return the storage they leave; wrappers give them the machine s
 context fields each one reads as arguments. Storage fields are slots of the handler, the context
 is one value of `std::evm::Evm` whose fields `Ctx` reads (`lower/evm.rs`), and functions that
 reach a contract's context, storage or `with`-bound effects take them as further parameters.
+A mutable borrow is copied in and out: a function with `mut` parameters, or one that writes the
+storage it is passed, returns their final values after its result, and its callers write them
+back to the places they lent, which the borrow checker keeps anyone else from reaching. A
+`StorageMap` is an SMT array from keys to values, zero where no one wrote.
 The machine obligations run its handlers in trusted blocks, where a panic, which reverts the
 transaction, ends the execution instead of failing it. A refuting sequence is sent to the
 compiled contract by the platform's `run_contract`.

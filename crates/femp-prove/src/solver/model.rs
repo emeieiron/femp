@@ -94,6 +94,42 @@ pub fn show(sexp: &Sexp, ty: &Type, table: &TypeTable) -> String {
             }
         }
         Type::Array { elem, len } => array(sexp, elem, *len, table).unwrap_or_else(fallback),
+        Type::Map { key, value } => map(sexp, key, value, table).unwrap_or_else(fallback),
+    }
+}
+
+/// Maps come back like arrays: a constant with stores on top. They show the
+/// entries that differ from the rest, then what every other key holds.
+fn map(sexp: &Sexp, key: &Type, value: &Type, table: &TypeTable) -> Option<String> {
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut current = sexp;
+    loop {
+        let items = current.list()?;
+        match items {
+            [Sexp::Atom(store), inner, at, held] if store == "store" => {
+                let at = show(at, key, table);
+                if !entries.iter().any(|(known, _)| *known == at) {
+                    entries.push((at, show(held, value, table)));
+                }
+                current = inner;
+            }
+            [head, held]
+                if head
+                    .list()
+                    .is_some_and(|h| h.first().and_then(Sexp::atom) == Some("as")) =>
+            {
+                let rest = show(held, value, table);
+                let mut parts: Vec<String> = entries
+                    .into_iter()
+                    .rev()
+                    .filter(|(_, held)| *held != rest)
+                    .map(|(at, held)| format!("{at}: {held}"))
+                    .collect();
+                parts.push(format!("_: {rest}"));
+                return Some(format!("{{{}}}", parts.join(", ")));
+            }
+            _ => return None,
+        }
     }
 }
 
