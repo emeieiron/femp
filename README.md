@@ -10,9 +10,10 @@ platform modules; the `femp` command-line tool turns the project into:
 | `native` | A command-line executable for the host | – |
 | `wasm` | A WebAssembly module and its build manifest | JavaScript wrapper, TypeScript declarations, host runtime |
 
-FeMP sits on top of the Fe compiler. It does not change the language: shared code is ordinary
-Fe ingots, platform differences are expressed with traits, effects and `#[cfg(target = ...)]`,
-and every build step is a call to `fe`.
+FeMP sits on top of the Fe compiler, which it links as a library: `femp` checks, builds, tests
+and proves with the compiler's own crates, so there is no separate `fe` to install. It does not
+change the language: shared code is ordinary Fe ingots, and platform differences are expressed
+with traits, effects and `#[cfg(target = ...)]`.
 
 ## Installing
 
@@ -24,9 +25,7 @@ The installer works on Linux (x86-64 and ARM, glibc) and macOS (Apple silicon an
 installs into `~/.femp` (or `FEMP_HOME`) and adds `~/.femp/bin` to `PATH` in your shell's
 startup files. It sets up:
 
-- **femp.**
-- **The Fe 26.6.0 compiler** built with the EVM, native and WebAssembly backends. Released Fe
-  binaries lack the WebAssembly backend, so femp ships its own build.
+- **femp**, with the Fe 26.6.0 compiler and its EVM, native and WebAssembly backends built in.
 - **Z3**, the solver `femp prove` uses, in `~/.femp/z3`. Its Linux builds need glibc 2.38 or
   newer; on older systems femp uses a `z3` from the system's package manager instead.
 - **Node.js**, for WebAssembly, when no Node.js 20 or newer is on `PATH`. It is kept in
@@ -48,7 +47,7 @@ curl -fsSL https://github.com/emeieiron/femp/releases/latest/download/installer.
 | --- | --- |
 | `--yes` | Install a missing C compiler without asking, for scripts and CI. |
 | `--no-modify-path` | Leave shell startup files alone. |
-| `--skip-deps` | Install femp and Fe only. |
+| `--skip-deps` | Install femp and Z3 only. |
 
 `FEMP_VERSION=v0.1.0` installs a specific release. To uninstall, delete `~/.femp` and the line
 the installer added to `~/.profile`, `~/.bashrc`, `~/.bash_profile` or `~/.zshrc`.
@@ -70,28 +69,26 @@ femp build
 
 ### Building from source
 
-Building from source needs Rust 1.96 or newer for femp, Rust 1.97 or newer and npm for the Fe
-compiler, Node.js 20 or newer, a C compiler, and Z3 for `femp prove`. femp links the Fe compiler's own crates for
-`femp prove`; Cargo fetches them from the Fe repository at the pinned release, so the first
-build takes a few minutes longer.
+Building from source needs Rust 1.97 or newer, and to run what femp builds, Node.js 20 or
+newer, a C compiler, and Z3 for `femp prove`. Cargo fetches the Fe compiler's crates from the
+Fe repository at the pinned release, so the first build takes a few minutes longer.
 
 ```sh
-cargo install --path crates/femp-cli   # installs the `femp` binary
-femp toolchain install                 # builds Fe 26.6.0 with all three backends (a few minutes)
+cargo install --path crates/femp-cli   # installs `femp`, with the compiler built in
 ```
 
-`femp toolchain install` compiles Fe from source into `~/.femp/toolchains/` (override with
-`FEMP_HOME`). To use a compiler you built yourself, point `FEMP_FE` at it; to use a particular
-Node.js, point `FEMP_NODE` at it, and a particular Z3, `FEMP_Z3`.
+To use a particular Node.js, point `FEMP_NODE` at it, and a particular Z3, `FEMP_Z3`.
+
+A project pins the compiler release in `femp.toml` (`[toolchain] fe = "26.6.0"`). Each femp
+build links one release, and refuses a project pinned to another.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `femp new <name>` | Creates a project with a shared module and one module per platform. |
-| `femp doctor` | Shows the compiler, its backends, host tools, and which platforms are available. |
+| `femp doctor` | Shows the linked compiler, its backends, host tools, and which platforms are available. |
 | `femp generate` | Materializes generated sources for editing and code navigation. |
-| `femp toolchain install` | Builds the pinned Fe compiler with the backends FeMP drives. |
 | `femp check [-t <platform>]` | Type-checks platform modules, and every shared module once per platform. |
 | `femp build [-t <platform>] [-O <level>]` | Compiles platform modules into `build/` and generates bindings. |
 | `femp test [-t <platform>] [-f <pattern>]` | Runs shared tests on every platform and compares the outcomes. |
@@ -208,12 +205,12 @@ See [docs/proving.md](docs/proving.md) for specs, loops, verdicts and limits.
 | Path | Contents |
 | --- | --- |
 | `crates/femp-core` | Project model, layering rules, and the `Platform` trait. |
-| `crates/femp-toolchain` | Locating, installing and invoking the Fe compiler. |
+| `crates/femp-compiler` | The Fe compiler, linked as a library: checks, builds, tests, and lowering into the prover's IR. |
+| `crates/femp-host` | Finding Node.js, a C compiler and Z3 on the machine. |
 | `crates/femp-evm`, `femp-native`, `femp-wasm` | One adapter per platform. |
 | `crates/femp-testing` | Cross-platform test runs and the parity matrix. |
 | `crates/femp-spec` | The claims both tools read: discovery, `#[gen]` domains, counterexamples. |
 | `crates/femp-prop` | Property testing: generators, the engine, shrinking, regressions, reports. |
-| `crates/femp-frontend` | Lowers Fe code into the prover's IR with the Fe compiler's own crates. |
 | `crates/femp-vir` | The verification IR. |
 | `crates/femp-prove` | Proving: tasks, passes, verification conditions, the solver, verdicts, reports. |
 | `crates/femp-harness` | Line-protocol sessions with harnesses that run as processes. |

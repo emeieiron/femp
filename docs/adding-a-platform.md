@@ -7,9 +7,9 @@ line in the registry. Nothing else in the workspace needs to change.
 
 ```
 crates/femp-<id>/
-  Cargo.toml        depends on femp-core and femp-toolchain
+  Cargo.toml        depends on femp-core and femp-compiler
   src/lib.rs        the Platform implementation
-  src/build.rs      compiler invocation and artifact collection
+  src/build.rs      the build through femp-compiler, and the files it writes
 ```
 
 `femp-native` is the smallest existing adapter and a good starting point.
@@ -23,7 +23,7 @@ crates/femp-<id>/
 | `stability` | `Experimental` while the compiler backend is. |
 | `capability` | `Available`, or `Unavailable` with a reason and, where one exists, a fix. Decide from the `Environment` only; do not spawn processes here. |
 | `binding_kinds` | The binding kinds you can generate, or `&[]`. Projects select among them in `[platform.<id>]`. |
-| `check`, `test` | Usually `femp_toolchain::module_ops::{check, test}` with your backend name. |
+| `check`, `test` | Usually `femp_compiler::load(module, target)` and `femp_compiler::test(module, id, target, options)`. |
 | `build` | Compile `module` into `out_dir` and return what was written. Use `Artifact::existing` so a file the compiler did not produce is an error, and `reset_dir` so stale output cannot leak into a build. |
 | `bindings` | Generate the requested kinds from `built` into `out_dir`. Mark generated sources with `ArtifactKind::BINDING`. |
 | `package` | Arrange `built` under `dist_dir` for distribution. `copy_flat` is enough for most platforms. |
@@ -34,9 +34,8 @@ Declare the artifact kinds you produce as constants:
 pub const ELF: ArtifactKind = ArtifactKind("elf");
 ```
 
-If the compiler needs input in a different shape than an ingot directory, prepare it inside
-`build` and keep that step private to the crate, as the WebAssembly adapter does with its
-bundler.
+A new compiler target also needs a `femp_compiler::Target` and a build method on
+`femp_compiler::Session`, since `femp-compiler` is the only crate that links the compiler.
 
 ## 3. Register it
 
