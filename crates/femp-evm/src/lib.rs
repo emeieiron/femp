@@ -12,8 +12,7 @@ use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
 use femp_core::property::{Executor, HarnessRequest};
-use femp_compiler::Target;
-use femp_toolchain::module_ops;
+use femp_compiler::{Target, TestOptions};
 
 pub use build::{ABI, BYTECODE, METADATA, RUNTIME_BYTECODE};
 
@@ -75,7 +74,12 @@ impl Platform for EvmPlatform {
     }
 
     fn test(&self, cx: &Context<'_>, module: &Module, filter: Option<&str>) -> Result<TestRun> {
-        module_ops::test(cx, BACKEND, &self.id, module, filter)
+        let options = TestOptions {
+            optimize: cx.optimize,
+            filter,
+            wasm: None,
+        };
+        femp_compiler::test(module, &self.id, Target::Evm, &options)
     }
 
     fn bindings(

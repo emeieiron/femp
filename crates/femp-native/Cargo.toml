@@ -10,7 +10,6 @@ repository.workspace = true
 [dependencies]
 femp-compiler.workspace = true
 femp-core.workspace = true
-femp-toolchain.workspace = true
 femp-harness.workspace = true
 
 [dev-dependencies]

@@ -18,6 +18,7 @@ mod session;
 mod spans;
 mod spec_ops;
 mod target;
+mod test;
 mod types;
 mod wasm;
 
@@ -25,10 +26,11 @@ pub use error::{CompileError, Unsupported};
 pub use evm::{Contract, EvmBuild};
 pub use find::Root;
 pub use lower::Lowered;
-pub use module::load;
+pub use module::{load, test};
 pub use session::Session;
 pub use spec_ops::SPEC_INGOT;
 pub use target::Target;
+pub use test::{CaseResult, TestOptions, TestReport, WasmRunner};
 pub use wasm::WasmModule;
 
 /// The Fe release whose compiler crates this crate links. A project pinned
