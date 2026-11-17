@@ -136,6 +136,7 @@ fn suite() -> Suite {
             steps: "1..=20".into(),
             runs: Some(200),
             clock: None,
+            reuse: false,
             location: location(),
         }],
     }
