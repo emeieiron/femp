@@ -244,3 +244,33 @@ fn contracts_are_tested_on_their_deployed_storage() {
         assert!(entry.starts_with("PASS"), "{entry}");
     }
 }
+
+#[test]
+fn contract_runs_find_bugs_that_need_their_values_to_meet() {
+    let Some(project) = common::project(DEMONSTRATOR) else {
+        return;
+    };
+    // Claiming counts the amount twice, which only shows when a claim is
+    // more than half of what has vested.
+    let lib = project.path().join("evm/src/lib.fe");
+    let source = fs::read_to_string(&lib).unwrap();
+    let planted = source.replace(
+        "store.claimed = updated.claimed\n",
+        "store.claimed = updated.claimed + amount\n",
+    );
+    assert_ne!(source, planted);
+    fs::write(&lib, planted).unwrap();
+
+    let output = femp(
+        project.path(),
+        &["prop", "-t", "evm", "-f", "Vesting", "--seed", "7"],
+    );
+    let report = stdout(&output);
+    let vesting = contract_entry(&report, "contracts::Vesting");
+    assert!(vesting.starts_with("FAIL"), "{vesting}");
+    assert!(vesting.contains("1. Claim(amount = "), "{vesting}");
+    assert!(
+        vesting.contains("invariant `claims_stay_within_total` fails after step 1"),
+        "{vesting}"
+    );
+}

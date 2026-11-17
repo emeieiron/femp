@@ -213,16 +213,22 @@ impl Contracts {
                 effects: Vec::new(),
                 location: location.clone(),
             };
+            // One command, which no run reaches, keeps the machine well formed
+            // until the target skips it.
             let machine = Machine {
                 name: name.clone(),
                 path,
                 init: method("init"),
-                commands: Vec::new(),
+                commands: vec![femp_core::property::Command {
+                    method: method("message"),
+                    weight: 1,
+                }],
                 invariants: Vec::new(),
                 observations: Vec::new(),
                 steps: "1..=16".to_string(),
                 runs: None,
                 clock: None,
+                reuse: false,
                 location: location.clone(),
             };
             self.push(
@@ -263,7 +269,8 @@ fn decided(machine: &Machine) -> Support {
 }
 
 /// The machine runs draw: messages without the clock's context, whose
-/// steps advance the clock instead, and context from realistic ranges.
+/// steps advance the clock instead, context from realistic ranges, and
+/// arguments that may repeat earlier ones, as an amount that is a total.
 fn drawn(handlers: &Machine) -> Machine {
     let mut machine = handlers.clone();
     let mut clocked = false;
@@ -284,6 +291,7 @@ fn drawn(handlers: &Machine) -> Machine {
         }
     }
     machine.clock = clocked.then(|| "any".to_string());
+    machine.reuse = true;
     machine
 }
 
@@ -584,6 +592,7 @@ mod tests {
             steps: "1..=16".to_string(),
             runs: None,
             clock: None,
+            reuse: false,
             location,
         }
     }
@@ -603,6 +612,7 @@ mod tests {
         // The deployment keeps its own time, which the steps start from.
         assert_eq!(drawn.init.params.len(), 1);
         assert_eq!(drawn.clock.as_deref(), Some("any"));
+        assert!(drawn.reuse);
     }
 
     #[test]

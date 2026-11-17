@@ -140,6 +140,11 @@ each message claim, runs as a machine of its own over the contract's messages:
   it by a generated number of seconds. The block number grows by one per message.
 - An address, `ctx.caller` included, is one of the accounts `0` to `3`, so the account that
   receives tokens is the one that later sends them.
+- Any other argument, and each step's advance of the clock, is drawn fresh half the time, and
+  otherwise as a value of its type drawn earlier in the run, as it is or one above or below
+  it: a claim of exactly the total, a time that is exactly the end of a schedule. A fresh value
+  is the simplest, so shrinking turns a repeated value into a fresh one where the failure
+  allows.
 
 ```
 FAIL  contracts::Token                        fails after 9 runs
@@ -148,8 +153,6 @@ FAIL  contracts::Token                        fails after 9 runs
       evm  invariant `supply_stays_small` fails after step 1
 ```
 
-Arguments are drawn on their own, so a failure that needs two of them to agree, such as claiming
-a large share of a small total, can take many runs; `femp prove` finds such sequences directly.
 A contract that reads `ctx.origin`, `ctx.address`, `ctx.selfbalance` or `ctx.blobbasefee` is
 not run, and a `#[reverts]` claim with parameters the message does not name is not tested.
 

@@ -217,6 +217,7 @@ mod tests {
             steps: "1..=20".to_string(),
             runs: None,
             clock: None,
+            reuse: false,
             location: Location {
                 file: "m.fe".into(),
                 line: 1,

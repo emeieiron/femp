@@ -439,6 +439,7 @@ impl Builder {
                 .unwrap_or_else(|| DEFAULT_STEPS.to_string()),
             runs,
             clock: options.get("clock").cloned(),
+            reuse: false,
             location: Location {
                 file: file.to_path_buf(),
                 line: item.line,

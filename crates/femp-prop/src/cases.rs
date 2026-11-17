@@ -42,6 +42,21 @@ impl ArgsGen {
             .collect()
     }
 
+    /// Draws the arguments, each marked in `reusable` possibly as a value of
+    /// `pool`, and adds them to it.
+    fn draw_reusing(
+        &self,
+        reusable: &[bool],
+        choices: &mut Choices,
+        pool: &mut Vec<Value>,
+    ) -> Vec<Value> {
+        self.params
+            .iter()
+            .zip(reusable)
+            .map(|(param, reusable)| draw_value(param, *reusable, choices, pool))
+            .collect()
+    }
+
     /// The number of distinct argument lists, when every parameter's domain
     /// is small and their product fits in a `u64`.
     pub fn domain_size(&self) -> Option<u64> {
@@ -71,15 +86,97 @@ impl ArgsGen {
 struct CommandGen {
     weight: u64,
     args: ArgsGen,
+    /// Which arguments may repeat a value drawn before them.
+    reusable: Vec<bool>,
 }
 
 #[derive(Debug)]
 pub struct SequenceGen {
     init: ArgsGen,
+    init_reusable: Vec<bool>,
     commands: Vec<CommandGen>,
     min_steps: usize,
     max_steps: usize,
     clock: Option<Shared>,
+    clock_reusable: bool,
+}
+
+/// How a reusable value is drawn: fresh, which is simplest, or as a value
+/// drawn before it in the run, as it is or one above or below it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reuse {
+    Fresh,
+    Same,
+    Above,
+    Below,
+}
+
+impl Reuse {
+    const ALL: [Reuse; 4] = [Reuse::Fresh, Reuse::Same, Reuse::Above, Reuse::Below];
+
+    /// Fresh half the time, the same value a quarter, and one off the rest.
+    fn draw(choices: &mut Choices) -> Self {
+        let choice = choices.draw(U256::from(3u8), |rng| {
+            U256::from(match rng.below_u64(8) {
+                0..=3 => 0u8,
+                4 | 5 => 1,
+                6 => 2,
+                _ => 3,
+            })
+        });
+        Self::ALL[choice.as_limbs()[0] as usize]
+    }
+
+    fn apply(self, value: Value) -> Value {
+        let ty = value.ty();
+        let one = U256::from(1u8);
+        let ordinal = value.ordinal();
+        match self {
+            Reuse::Fresh | Reuse::Same => value,
+            Reuse::Above if ordinal < ty.max_ordinal() => Value::from_ordinal(ty, ordinal + one),
+            Reuse::Below if ordinal > U256::ZERO => Value::from_ordinal(ty, ordinal - one),
+            Reuse::Above | Reuse::Below => value,
+        }
+    }
+}
+
+/// Draws one value, which may repeat one of `pool`, the values drawn
+/// before it, and adds it to them.
+fn draw_value(
+    generator: &Shared,
+    reusable: bool,
+    choices: &mut Choices,
+    pool: &mut Vec<Value>,
+) -> Value {
+    let value = if reusable {
+        let how = Reuse::draw(choices);
+        let ty = generator.ty();
+        let earlier: Vec<Value> = pool
+            .iter()
+            .filter(|value| value.ty() == ty)
+            .copied()
+            .collect();
+        if how == Reuse::Fresh || earlier.is_empty() {
+            generator.draw(choices)
+        } else {
+            let index =
+                choices.draw_index(earlier.len(), |rng| rng.below_u64(earlier.len() as u64));
+            how.apply(earlier[index])
+        }
+    } else {
+        generator.draw(choices)
+    };
+    pool.push(value);
+    value
+}
+
+/// Which of `params` may repeat earlier values in a machine that reuses
+/// them: those drawn from their whole type, where any value of it fits.
+fn reusable(machine: &Machine, params: &[Param]) -> Vec<bool> {
+    params
+        .iter()
+        .map(|param| machine.reuse && param.generator == "any" && param.ty != Ty::Bool)
+        .collect()
 }
 
 impl SequenceGen {
@@ -94,6 +191,7 @@ impl SequenceGen {
                     weight: command.weight.max(1) as u64,
                     args: ArgsGen::for_params(registry, &command.method.params)
                         .map_err(|error| format!("`{}`: {error}", command.method.name))?,
+                    reusable: reusable(machine, &command.method.params),
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -110,10 +208,12 @@ impl SequenceGen {
             .map_err(|error| format!("`clock`: {error}"))?;
         Ok(Self {
             init,
+            init_reusable: reusable(machine, &machine.init.params),
             commands,
             min_steps,
             max_steps,
             clock,
+            clock_reusable: machine.reuse && machine.clock.as_deref() == Some("any"),
         })
     }
 
@@ -121,7 +221,10 @@ impl SequenceGen {
     /// whole steps without misaligning the rest. A step starts with a flag
     /// whose simplest value, 0, ends the sequence once it is long enough.
     pub fn draw(&self, choices: &mut Choices) -> Sequence {
-        let init = self.init.draw(choices);
+        let mut pool = Vec::new();
+        let init = self
+            .init
+            .draw_reusing(&self.init_reusable, choices, &mut pool);
         let stop_odds = 1 + (self.max_steps - self.min_steps) as u64 / 2;
         let total: u64 = self.commands.iter().map(|command| command.weight).sum();
         let mut steps = Vec::new();
@@ -139,11 +242,13 @@ impl SequenceGen {
                 U256::from(rng.below_u64(total))
             });
             let command = self.pick(pick.as_limbs()[0]);
-            let args = self.commands[command].args.draw(choices);
-            let advance = self
-                .clock
-                .as_ref()
-                .map_or(0, |clock| clock.draw(choices).to_u64_bits());
+            let generator = &self.commands[command];
+            let args = generator
+                .args
+                .draw_reusing(&generator.reusable, choices, &mut pool);
+            let advance = self.clock.as_ref().map_or(0, |clock| {
+                draw_value(clock, self.clock_reusable, choices, &mut pool).to_u64_bits()
+            });
             choices.end_span();
             steps.push(Step {
                 command,
@@ -234,11 +339,64 @@ mod tests {
             steps: "2..=6".to_string(),
             runs: None,
             clock: Some("0..=100".to_string()),
+            reuse: false,
             location: Location {
                 file: "model.fe".into(),
                 line: 1,
             },
         }
+    }
+
+    /// A deployment's total, then claims of an amount, both from their
+    /// whole type, as a contract's runs draw them.
+    fn reusing() -> Machine {
+        Machine {
+            init: method("init", vec![param("total", Ty::Uint(64), "any")]),
+            commands: vec![Command {
+                method: method("claim", vec![param("amount", Ty::Uint(64), "any")]),
+                weight: 1,
+            }],
+            steps: "1..=1".to_string(),
+            clock: None,
+            reuse: true,
+            ..machine()
+        }
+    }
+
+    #[test]
+    fn reusing_runs_repeat_earlier_values_and_their_neighbours() {
+        let generator = SequenceGen::for_machine(&Registry::standard(), &reusing()).unwrap();
+        let (mut same, mut near) = (0, 0);
+        for seed in 0..400 {
+            let mut choices = Choices::random(seed);
+            let sequence = generator.draw(&mut choices);
+            let total = sequence.init[0].ordinal();
+            let amount = sequence.steps[0].args[0].ordinal();
+            if total > U256::from(1u8) && amount == total {
+                same += 1;
+            }
+            if total > U256::from(1u8)
+                && (amount == total + U256::from(1u8) || amount + U256::from(1u8) == total)
+            {
+                near += 1;
+            }
+            // The tape regenerates the same run.
+            let tape = choices.into_tape();
+            assert_eq!(
+                generator.draw(&mut Choices::replay(&tape.choices)),
+                sequence
+            );
+        }
+        assert!(same > 40, "{same} of 400 claims repeat the total");
+        assert!(near > 20, "{near} of 400 claims are next to the total");
+    }
+
+    #[test]
+    fn the_simplest_reusing_run_draws_fresh_zeros() {
+        let generator = SequenceGen::for_machine(&Registry::standard(), &reusing()).unwrap();
+        let sequence = generator.draw(&mut Choices::replay(&[]));
+        assert_eq!(sequence.init[0].ordinal(), U256::ZERO);
+        assert_eq!(sequence.steps[0].args[0].ordinal(), U256::ZERO);
     }
 
     #[test]

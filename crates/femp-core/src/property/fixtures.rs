@@ -108,6 +108,7 @@ pub fn suite() -> Suite {
             steps: "1..=8".to_string(),
             runs: None,
             clock: None,
+            reuse: false,
             location: location(),
         }],
     }

@@ -92,6 +92,10 @@ pub struct Machine {
     pub runs: Option<u32>,
     /// Seconds the EVM block clock advances before each step.
     pub clock: Option<String>,
+    /// Whether arguments drawn from their whole type may repeat a value
+    /// drawn before them in the run, so that messages meet: an amount that
+    /// is the total, or a time that is a deadline.
+    pub reuse: bool,
     pub location: Location,
 }
 

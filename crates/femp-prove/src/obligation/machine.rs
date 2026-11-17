@@ -622,6 +622,7 @@ pub fn contract_machine(
         steps: "1..=16".to_string(),
         runs: None,
         clock: None,
+        reuse: false,
         location: location.clone(),
     };
     let fns = MachineFns {
