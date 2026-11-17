@@ -77,10 +77,14 @@ impl Places {
 pub enum ReplayCase {
     Args(Vec<Value>),
     Sequence(Sequence),
-    /// A sequence whose last transaction goes through, or reverts.
+    /// A contract's sequence whose last transaction goes through, or
+    /// reverts, with the values the broken claim is checked at after it
+    /// and what the claim gives there: false for broken invariants.
     Transactions {
         sequence: Sequence,
         last_goes_through: bool,
+        extra: Vec<Value>,
+        holds: bool,
     },
 }
 
@@ -347,7 +351,20 @@ fn machine_status(
             sequence_counterexample(machine, &sequence),
             done.targets.clone(),
         );
-        return (Some(status), Some(ReplayCase::Sequence(sequence)));
+        let replay = match plan.entry {
+            Entry::Storage(_) => ReplayCase::Transactions {
+                extra: refutation
+                    .values
+                    .get(machine::inputs_through(machine, steps)..)
+                    .unwrap_or_default()
+                    .to_vec(),
+                sequence,
+                last_goes_through: true,
+                holds: false,
+            },
+            _ => ReplayCase::Sequence(sequence),
+        };
+        return (Some(status), Some(replay));
     }
     let step = refuted(plan, |role| matches!(role, Role::Step(_)));
     let Some((done, refutation)) = step else {
@@ -413,9 +430,17 @@ fn message_status(plan: &ClaimPlan, places: &Places) -> (Option<ClaimStatus>, Op
             sequence_counterexample(machine, &sequence),
             done.targets.clone(),
         );
+        let consumed = machine::inputs_through(machine, done.index)
+            + machine.commands[side.command].method.params.len();
         let replay = ReplayCase::Transactions {
             sequence,
             last_goes_through: check != machine::MessageCheck::GoesThrough,
+            extra: refutation
+                .values
+                .get(consumed..)
+                .unwrap_or_default()
+                .to_vec(),
+            holds: check == machine::MessageCheck::Reverts,
         };
         return (Some(status), Some(replay));
     }

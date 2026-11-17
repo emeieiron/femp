@@ -13,7 +13,7 @@ use femp_core::environment::Environment;
 use femp_core::outcome::TestRun;
 use femp_core::platform::{Capability, Context, Platform, PlatformId, Stability};
 use femp_core::project::Module;
-use femp_core::property::{Delivery, Executor, HarnessRequest, Transactions};
+use femp_core::property::{Deployer, Executor, HarnessRequest};
 
 pub use build::{ABI, BYTECODE, METADATA, RUNTIME_BYTECODE};
 
@@ -108,13 +108,12 @@ impl Platform for EvmPlatform {
         harness::start(cx, &self.id, request)
     }
 
-    fn run_contract(
+    fn deployer(
         &self,
         cx: &Context<'_>,
         module: &Module,
-        transactions: &Transactions,
         out_dir: &Path,
-    ) -> Result<Vec<Delivery>> {
-        deployment::run(cx, module, transactions, out_dir)
+    ) -> Result<Box<dyn Deployer>> {
+        Ok(Box::new(deployment::Built::new(cx, module, out_dir)?))
     }
 }

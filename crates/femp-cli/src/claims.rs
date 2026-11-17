@@ -103,14 +103,12 @@ pub fn list(found: &[(&Module, Claims)], all_specs: bool) {
                 line(&contract.name, "spec", &contract.location);
             }
         }
-        if all_specs {
-            for claim in &claims.storage {
-                if claim.claims_invariants && !claim.invariants.is_empty() {
-                    line(&claim.name, "contract", &claim.location);
-                }
-                for message in &claim.messages {
-                    line(&message.name, "message", &message.location);
-                }
+        for claim in &claims.storage {
+            if claim.claims_invariants && !claim.invariants.is_empty() {
+                line(&claim.name, "contract", &claim.location);
+            }
+            for message in &claim.messages {
+                line(&message.name, "message", &message.location);
             }
         }
     }

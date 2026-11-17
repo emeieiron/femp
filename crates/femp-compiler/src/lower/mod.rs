@@ -5,6 +5,7 @@
 mod body;
 mod contract;
 pub(crate) mod evm;
+mod storage;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -24,6 +25,7 @@ use crate::types::Types;
 pub use contract::{
     ContractRoot, Handler, Invariant, LoweredContract, LoweredMessage, MessageRoot,
 };
+pub use storage::{StorageLayout, Word};
 
 /// The program for a set of roots, and for each root its function or why it
 /// cannot be lowered; likewise for each contract.
@@ -92,7 +94,7 @@ impl Session {
         }
     }
 
-    fn find_contract(&self, root: &ContractRoot) -> Option<hir::hir_def::Contract<'_>> {
+    pub(crate) fn find_contract(&self, root: &ContractRoot) -> Option<hir::hir_def::Contract<'_>> {
         let db = &self.db;
         let tree = hir::lower::module_tree(db, self.ingot());
         tree.all_modules()

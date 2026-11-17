@@ -1,3 +1,5 @@
+mod deployed;
+
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -6,7 +8,7 @@ use femp_core::artifact::write_file;
 use femp_core::environment::OptLevel;
 use femp_core::platform::Platform;
 use femp_core::project::{BUILD_DIR, Module};
-use femp_core::property::{Executor, HarnessRequest, Suite};
+use femp_core::property::{Executor, HarnessRequest};
 use femp_prop::compare;
 use femp_prop::engine::{Config, Engine, Target, format_seed};
 use femp_prop::generators::Registry;
@@ -22,6 +24,7 @@ use crate::session::Session;
 
 const PROP_DIR: &str = "prop";
 const REPORT_FILE: &str = "report.json";
+const CONTRACTS_DIR: &str = "contracts";
 
 pub fn run(args: &PropArgs) -> Result<bool> {
     let comparator = compare::by_name(&args.compare).ok_or_else(|| {
@@ -40,20 +43,18 @@ pub fn run(args: &PropArgs) -> Result<bool> {
     let found: Vec<(&Module, Claims)> =
         claims::discover_all(project, &platforms, args.filter.as_deref())?
             .into_iter()
-            .filter(|(_, claims)| !claims.testable().is_empty())
+            .filter(|(_, claims)| !claims.testable().is_empty() || !claims.storage.is_empty())
             .collect();
     if found.is_empty() {
-        console::warning("no `#[property]`, `#[differential]` or `#[machine]` entry points found");
+        console::warning(
+            "no `#[property]`, `#[differential]`, `#[machine]` or contract claims found",
+        );
         return Ok(true);
     }
     if args.list {
         claims::list(&found, false);
         return Ok(true);
     }
-    let suites: Vec<(&Module, Suite)> = found
-        .into_iter()
-        .map(|(module, claims)| (module, claims.testable()))
-        .collect();
 
     let seed = match &args.seed {
         Some(text) => parse_seed(text)?,
@@ -90,7 +91,11 @@ pub fn run(args: &PropArgs) -> Result<bool> {
     console::step("Seed", &format_seed(seed));
     let mut entries = Vec::new();
     let mut labels = Vec::new();
-    for (module, suite) in &suites {
+    for (module, claims) in &found {
+        let suite = &claims.testable();
+        if suite.is_empty() {
+            continue;
+        }
         let mut executors: Vec<(String, Box<dyn Executor>)> = Vec::new();
         for platform in platforms
             .iter()
@@ -141,6 +146,56 @@ pub fn run(args: &PropArgs) -> Result<bool> {
                 console::step("Checked", &entry.label());
             }),
         );
+    }
+    // Contracts run on their platform, built once per optimization level.
+    for (module, claims) in &found {
+        let Some(platform) = platforms
+            .iter()
+            .find(|platform| module.platform() == Some(platform.id()))
+        else {
+            continue;
+        };
+        let Some(contracts) = deployed::Contracts::lower(module, claims, platform.fe_target())?
+        else {
+            continue;
+        };
+        let mut executors = Vec::new();
+        for level in levels {
+            let target = label(*platform, *level);
+            console::step(
+                "Building",
+                &format!("{} for deployment [{target}]", module.name),
+            );
+            let cx = inputs.context(*level);
+            let out_dir = project
+                .root
+                .join(BUILD_DIR)
+                .join(PROP_DIR)
+                .join(&target)
+                .join(&module.name)
+                .join(CONTRACTS_DIR);
+            let deployer = platform
+                .deployer(&cx, module, &out_dir)
+                .map_err(|error| module.compiler_error(error))
+                .with_context(|| format!("cannot build the contracts of `{}`", module.name))?;
+            if !labels.contains(&target) {
+                labels.push(target.clone());
+            }
+            executors.push((target, contracts.executor(deployer)));
+        }
+        let mut targets: Vec<Target<'_>> = executors
+            .iter_mut()
+            .map(|(label, executor)| Target {
+                label: label.clone(),
+                executor,
+            })
+            .collect();
+        entries.extend(engine.run_suite(
+            &contracts.suite,
+            &mut targets,
+            &mut store,
+            &mut |entry| console::step("Checked", &entry.label()),
+        ));
     }
 
     let report = RunReport {

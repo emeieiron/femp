@@ -165,15 +165,17 @@ contract:
 REFUTED     contracts::Vesting  invariant `claims_stay_within_total` fails after step 1
             init(total = 1, start = 0, cliff = 0, duration = 1)
             1. Claim(ctx.timestamp = 1, amount = 1)
-            evm accepts every transaction
+            evm accepts every transaction, and its storage then breaks `claims_stay_within_total`
 ```
 
 The sequence is then sent to the compiled contract in an in-process EVM: it is deployed with
 the `init` arguments, and each message is sent with the selector and the context the search
-chose. Every transaction of a refuting sequence goes through in the proof, so a transaction the
-EVM rejects means the proof's model and the contract disagree, which fails the run. The EVM
-does not expose storage, so the replay confirms that the transactions go through, not the broken
-invariant itself.
+chose. After each transaction the replay reads the contract's storage from the slots the
+compiler laid its fields out in, and the map entries at every value the sequence names, decodes
+it into the fields, and evaluates the broken invariant on it. Every transaction of a refuting
+sequence goes through in the proof and leaves storage that breaks the invariant; a transaction
+the EVM rejects, or storage that satisfies the invariant, means the proof's model and the
+contract disagree, which fails the run.
 
 ### What one message does
 
@@ -217,11 +219,14 @@ that breaks it: stronger invariants may rule that storage out.
 REFUTED     contracts::transfer_reverts_when_short  `Transfer` goes through although `transfer_reverts_when_short` holds
             init(ctx.caller = 0)
             1. Transfer(ctx.caller = 0, to = 0, amount = 1)
-            evm accepts every transaction
+            evm accepts every transaction, and the claim holds on its storage before step 1
 ```
 
-Contract invariants and message claims are proved only. `femp prop` tests contracts through `#[machine]`s that
-deploy them and send them messages.
+The replay evaluates the claim on the storage before the message, and after it for
+`#[ensures]`, so the EVM confirms both what the message did and what the claim said about it.
+
+`femp prop` tests the same invariants and message claims with generated messages; see
+[property testing](property-testing.md#contracts).
 
 ## Loops
 
@@ -310,7 +315,8 @@ package manager.
   only. Calls to other contracts, creating contracts and raw storage access are not supported
   yet. An invariant cannot sum a map's entries.
 - A replayed sequence cannot choose `ctx.address`, `ctx.origin`, `ctx.selfbalance` or
-  `ctx.blobbasefee`, which the EVM decides.
+  `ctx.blobbasefee`, which the EVM decides. The replay reads a map's entries at the values the
+  sequence names; entries at keys it computes, such as a hash, read as zero.
 - Machines whose methods use effects, such as machines that deploy contracts, are not
   supported yet.
 - Differentials count any two panics as agreeing, whatever their reasons.

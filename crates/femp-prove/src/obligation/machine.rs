@@ -527,6 +527,17 @@ pub fn decode(machine: &Machine, steps: usize, values: &[Value]) -> Option<Seque
     })
 }
 
+/// How many of a search's inputs the deployment and its first `steps`
+/// steps take; the values the last state is checked at follow.
+pub fn inputs_through(machine: &Machine, steps: usize) -> usize {
+    let per_step: usize = 1 + machine
+        .commands
+        .iter()
+        .map(|command| command.method.params.len())
+        .sum::<usize>();
+    machine.init.params.len() + steps * per_step
+}
+
 /// The arguments of `method` among a step task's inputs, after its state.
 pub fn method_args<'v>(method: &Method, values: &'v [Value]) -> &'v [Value] {
     &values[..method.params.len().min(values.len())]
@@ -792,12 +803,7 @@ pub fn decode_message(
     values: &[Value],
 ) -> Option<Sequence> {
     let mut sequence = decode(machine, before, values)?;
-    let per_step: usize = 1 + machine
-        .commands
-        .iter()
-        .map(|command| command.method.params.len())
-        .sum::<usize>();
-    let consumed = machine.init.params.len() + before * per_step;
+    let consumed = inputs_through(machine, before);
     let count = machine.commands[command].method.params.len();
     let args = values.get(consumed..consumed + count)?.to_vec();
     sequence.steps.push(Step {

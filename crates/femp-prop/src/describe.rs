@@ -41,11 +41,15 @@ pub fn describe(machine: &Machine, trace: &Trace, focus: Option<usize>) -> Strin
     }
     for (at, record) in trace.records.iter().enumerate() {
         if let Some(invariant) = record.invariants.iter().position(|holds| !holds) {
-            return format!(
-                "invariant `{}` fails after {}",
-                machine.invariants[invariant].name,
-                step_name(machine, at)
-            );
+            let name = &machine.invariants[invariant].name;
+            // A machine named after its one check tests a claim, such as
+            // one about a contract's message, rather than an invariant.
+            let what = if *name == machine.name {
+                format!("`{name}`")
+            } else {
+                format!("invariant `{name}`")
+            };
+            return format!("{what} fails after {}", step_name(machine, at));
         }
     }
     format!("completed {} steps", trace.records.len().saturating_sub(1))

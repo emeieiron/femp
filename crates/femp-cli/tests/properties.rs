@@ -187,6 +187,60 @@ fn the_demonstrator_holds_on_every_platform() {
         report.contains("PASS  contracts::VestingContractMachine"),
         "{report}"
     );
+    assert!(report.contains("PASS  contracts::Vesting "), "{report}");
     assert!(report.contains("on evm, native, wasm"), "{report}");
-    assert!(report.contains("9 passed, 0 failed"), "{report}");
+    assert!(report.contains("10 passed, 0 failed"), "{report}");
+}
+
+/// One entry of a report, from its status line to the next entry.
+fn contract_entry<'a>(report: &'a str, name: &str) -> &'a str {
+    let start = report
+        .lines()
+        .position(|line| {
+            (line.starts_with("FAIL") || line.starts_with("PASS"))
+                && line.split_whitespace().nth(1) == Some(name)
+        })
+        .unwrap_or_else(|| panic!("no entry for {name} in\n{report}"));
+    let offset: usize = report.lines().take(start).map(|line| line.len() + 1).sum();
+    let rest = &report[offset..];
+    let end = rest[1..]
+        .find("\nFAIL")
+        .or_else(|| rest[1..].find("\nPASS"))
+        .or_else(|| rest.find("\n\n"))
+        .map_or(rest.len(), |end| end + 1);
+    &rest[..end]
+}
+
+#[test]
+fn contracts_are_tested_on_their_deployed_storage() {
+    let project = common::token_project();
+    let output = femp(project.path(), &["prop", "--seed", "7"]);
+    let report = stdout(&output);
+    assert!(!output.status.success(), "{report}");
+
+    let token = contract_entry(&report, "contracts::Token");
+    assert!(token.starts_with("FAIL"), "{token}");
+    assert!(
+        token.contains("1. Mint(ctx.caller = 0, to = 0, amount = 1001)"),
+        "{token}"
+    );
+    assert!(
+        token.contains("invariant `supply_stays_small` fails after step 1"),
+        "{token}"
+    );
+    assert!(
+        token.contains("saved to regressions/contracts/Token.json"),
+        "{token}"
+    );
+
+    let short = contract_entry(&report, "contracts::transfer_reverts_when_short");
+    assert!(short.starts_with("FAIL"), "{short}");
+    assert!(
+        short.contains("`transfer_reverts_when_short` fails after step 1"),
+        "{short}"
+    );
+    for held in ["transfer_moves_tokens", "mint_reverts"] {
+        let entry = contract_entry(&report, &format!("contracts::{held}"));
+        assert!(entry.starts_with("PASS"), "{entry}");
+    }
 }

@@ -2,6 +2,7 @@ mod claims;
 mod cli;
 mod commands;
 mod console;
+mod contracts;
 mod generation;
 mod pipeline;
 mod registry;

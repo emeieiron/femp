@@ -121,6 +121,38 @@ How a contract machine runs on the EVM:
 - A command whose transaction reverts with a custom error is recorded as rejected: its effects
   are rolled back and the run continues. A panic or a halt fails the run.
 
+### Contracts
+
+A contract's storage `#[invariant]`s and its `#[ensures]` and `#[reverts]` message claims (see
+[proving](proving.md#contracts)) are tested without a machine. Each contract with invariants, and
+each message claim, runs as a machine of its own over the contract's messages:
+
+- A run deploys the compiled contract with generated `init` arguments and sends it generated
+  messages, each its own transaction. A constructor that reverts leaves nothing to check.
+- After each transaction, the contract's storage is read, decoded into its fields and judged
+  with the claims: every invariant after every transaction, a message claim at each step that
+  sends its message. A parameter of an invariant that is not a field takes every value of its
+  type the run names, and zero.
+- A message that reverts or panics is rejected: its transaction leaves storage as it was, as on
+  a chain, and the run continues. `#[reverts]` asks that the message reverts exactly where the
+  claim holds.
+- Block time only moves forward: `init` draws the deployment's timestamp, and each step advances
+  it by a generated number of seconds. The block number grows by one per message.
+- An address, `ctx.caller` included, is one of the accounts `0` to `3`, so the account that
+  receives tokens is the one that later sends them.
+
+```
+FAIL  contracts::Token                        fails after 9 runs
+      init(ctx.caller = 0)
+      1. Mint(ctx.caller = 0, to = 0, amount = 1001)
+      evm  invariant `supply_stays_small` fails after step 1
+```
+
+Arguments are drawn on their own, so a failure that needs two of them to agree, such as claiming
+a large share of a small total, can take many runs; `femp prove` finds such sequences directly.
+A contract that reads `ctx.origin`, `ctx.address`, `ctx.selfbalance` or `ctx.blobbasefee` is
+not run, and a `#[reverts]` claim with parameters the message does not name is not tested.
+
 ### Specs
 
 A public `#[spec]` function whose parameters and result are primitives runs as an entry point

@@ -1,7 +1,7 @@
-//! Runs a sequence of transactions against a module's contract in an
+//! Runs sequences of transactions against a module's contracts in an
 //! in-process EVM: deploys the contract with its constructor's arguments,
 //! then sends each message, each with the block and transaction context it
-//! names.
+//! names. The module is built once for every sequence.
 
 use std::fs;
 use std::path::Path;
@@ -9,12 +9,14 @@ use std::path::Path;
 use femp_core::artifact::of_kind;
 use femp_core::platform::Context;
 use femp_core::project::Module;
-use femp_core::property::{Delivery, Outcome, Transaction, Transactions, Value};
+use femp_core::property::{
+    ContractRun, Delivery, Deployer, Outcome, Transaction, Transactions, Value,
+};
 use femp_core::{Error, Result};
 use revm::bytecode::Bytecode;
 use revm::context::TxEnv;
 use revm::context::result::{ExecutionResult, Output};
-use revm::database::InMemoryDB;
+use revm::database::{DatabaseRef, InMemoryDB};
 use revm::handler::ExecuteCommitEvm;
 use revm::primitives::{Address, B256, Bytes, TxKind, U256};
 use revm::state::AccountInfo;
@@ -25,28 +27,53 @@ use crate::harness::exec::{Evm, GAS_LIMIT, decode_hex, evm, halt};
 /// The account transactions come from unless they name a caller.
 const SENDER: u8 = 0xfe;
 
-pub fn run(
-    cx: &Context<'_>,
-    module: &Module,
-    transactions: &Transactions,
-    out_dir: &Path,
-) -> Result<Vec<Delivery>> {
-    let built = build::build(cx, module, out_dir)?;
-    let artifact = of_kind(&built, BYTECODE)
-        .find(|artifact| contract_of(artifact) == transactions.contract)
-        .ok_or_else(|| {
-            Error::Artifact(format!(
-                "the build of `{}` has no contract `{}`",
-                module.name, transactions.contract
-            ))
-        })?;
-    let hex = fs::read_to_string(&artifact.path)
-        .map_err(|source| Error::io("read", &artifact.path, source))?;
-    let mut data = decode_hex(&hex)?;
+/// A module's contracts, by name, with their deployment bytecode.
+pub struct Built {
+    module: String,
+    contracts: Vec<(String, Vec<u8>)>,
+}
+
+impl Built {
+    pub fn new(cx: &Context<'_>, module: &Module, out_dir: &Path) -> Result<Self> {
+        let built = build::build(cx, module, out_dir)?;
+        let mut contracts = Vec::new();
+        for artifact in of_kind(&built, BYTECODE) {
+            let hex = fs::read_to_string(&artifact.path)
+                .map_err(|source| Error::io("read", &artifact.path, source))?;
+            contracts.push((contract_of(artifact), decode_hex(&hex)?));
+        }
+        Ok(Self {
+            module: module.name.clone(),
+            contracts,
+        })
+    }
+}
+
+impl Deployer for Built {
+    fn run(&mut self, transactions: &Transactions) -> Result<ContractRun> {
+        let (_, code) = self
+            .contracts
+            .iter()
+            .find(|(name, _)| *name == transactions.contract)
+            .ok_or_else(|| {
+                Error::Artifact(format!(
+                    "the build of `{}` has no contract `{}`",
+                    self.module, transactions.contract
+                ))
+            })?;
+        run(code, transactions)
+    }
+}
+
+fn run(code: &[u8], transactions: &Transactions) -> Result<ContractRun> {
+    let mut data = code.to_vec();
     data.extend(words(&transactions.deploy.args));
 
     let mut evm = evm(InMemoryDB::default());
-    let mut deliveries = Vec::new();
+    let mut run = ContractRun {
+        deliveries: Vec::new(),
+        storage: Vec::new(),
+    };
     let result = send(&mut evm, &transactions.deploy, TxKind::Create, data)?;
     let address = match result {
         ExecutionResult::Success {
@@ -54,11 +81,14 @@ pub fn run(
             ..
         } => address,
         other => {
-            deliveries.push(Delivery::Rejected(rejection(other)));
-            return Ok(deliveries);
+            run.deliveries.push(Delivery::Rejected(rejection(other)));
+            run.storage.push(vec![[0; 32]; transactions.reads.len()]);
+            return Ok(run);
         }
     };
-    deliveries.push(Delivery::Accepted);
+    run.deliveries.push(Delivery::Accepted);
+    run.storage
+        .push(storage(&evm, address, &transactions.reads));
     for call in &transactions.calls {
         let mut data = call
             .selector
@@ -69,9 +99,27 @@ pub fn run(
             ExecutionResult::Success { .. } => Delivery::Accepted,
             other => Delivery::Rejected(rejection(other)),
         };
-        deliveries.push(delivery);
+        run.deliveries.push(delivery);
+        run.storage
+            .push(storage(&evm, address, &transactions.reads));
     }
-    Ok(deliveries)
+    Ok(run)
+}
+
+/// The contract's words at `slots`; a slot no one wrote holds zero.
+fn storage(evm: &Evm, address: Address, slots: &[[u8; 32]]) -> Vec<[u8; 32]> {
+    slots
+        .iter()
+        .map(|slot| {
+            let slot = U256::from_be_bytes(*slot);
+            evm.ctx
+                .journaled_state
+                .database
+                .storage_ref(address, slot)
+                .unwrap_or_default()
+                .to_be_bytes::<32>()
+        })
+        .collect()
 }
 
 /// The arguments as ABI words, one per primitive.

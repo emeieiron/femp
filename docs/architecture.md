@@ -174,8 +174,16 @@ storage it is passed, returns their final values after its result, and its calle
 back to the places they lent, which the borrow checker keeps anyone else from reaching. A
 `StorageMap` is an SMT array from keys to values, zero where no one wrote.
 The machine obligations run its handlers in trusted blocks, where a panic, which reverts the
-transaction, ends the execution instead of failing it. A refuting sequence is sent to the
-compiled contract by the platform's `run_contract`.
+transaction, ends the execution instead of failing it.
+
+The compiled contract judges both commands' runs (`femp-cli/src/contracts.rs`). The platform's
+`deployer` builds a module's contracts once and runs sequences of transactions on fresh
+deployments, reading the storage slots it is given after each one. `lower/storage.rs` names
+those slots from the compiler's storage layout, a map entry at `keccak256(key ++ slot)` for each
+value the run names, and decodes the words read back into the state the prover's IR uses;
+`femp_vir::eval`, an interpreter of that IR, evaluates the claims on it. `femp prove` checks a
+refuting sequence this way, and `femp prop` runs each contract claim as a machine whose runs
+are judged on the storage after every transaction (`commands/prop/deployed.rs`).
 
 ## Compiler and host
 

@@ -92,7 +92,7 @@ build links one release, and refuses a project pinned to another.
 | `femp check [-t <platform>]` | Type-checks platform modules, and every shared module once per platform. |
 | `femp build [-t <platform>] [-O <level>]` | Compiles platform modules into `build/` and generates bindings. |
 | `femp test [-t <platform>] [-f <pattern>]` | Runs shared tests on every platform and compares the outcomes. |
-| `femp prop [-t <platform>] [-f <pattern>] [--seed <n>]` | Runs properties, differentials and state machines with generated inputs on every platform, and minimizes failures. |
+| `femp prop [-t <platform>] [-f <pattern>] [--seed <n>]` | Runs properties, differentials, state machines and contract claims with generated inputs on every platform, and minimizes failures. |
 | `femp prove [-t <platform>] [-f <pattern>]` | Proves the same claims, `#[spec]` functions and contract `#[invariant]`s for all inputs, and replays counterexamples on every platform. |
 | `femp package` | Builds, then collects distributable packages and a hash index under `dist/`. |
 | `femp clean` | Removes `build/` and `dist/`. |
@@ -153,6 +153,9 @@ pub fn vested_never_exceeds_total(total: u64, start: u64, cliff: u64, duration: 
 - **`#[differential]`** must give the same value, error or panic on every platform.
 - **`#[machine]`** generates sequences of commands and checks invariants after each step.
   Declared in an `evm` module, a machine can deploy and drive the project's contracts.
+- A contract's storage **`#[invariant]`s**, and its `#[ensures]` and `#[reverts]` message claims,
+  are tested on the deployed contract: generated messages, then its storage read and checked
+  after each one.
 
 Each failure is shrunk to a minimal counterexample. It is reported with each platform's outcome
 and the seed that reproduces it, and saved under `regressions/`, which later runs replay first:
@@ -212,7 +215,7 @@ fn claims_stay_within_total(store: VestingStore) -> bool {
 REFUTED     contracts::Vesting  invariant `claims_stay_within_total` fails after step 1
             init(total = 1, start = 0, cliff = 0, duration = 1)
             1. Claim(ctx.timestamp = 1, amount = 1)
-            evm accepts every transaction
+            evm accepts every transaction, and its storage then breaks `claims_stay_within_total`
 ```
 
 See [docs/proving.md](docs/proving.md) for specs, contracts, loops, verdicts and limits.

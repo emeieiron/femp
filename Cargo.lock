@@ -2178,6 +2178,7 @@ version = "0.1.0"
 dependencies = [
  "femp-compiler",
  "femp-core",
+ "femp-vir",
  "revm",
  "serde",
  "serde_json",
@@ -2254,6 +2255,7 @@ name = "femp-vir"
 version = "0.1.0"
 dependencies = [
  "femp-core",
+ "num-bigint",
 ]
 
 [[package]]

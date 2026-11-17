@@ -4,6 +4,7 @@
 //! cause them until the prover's passes turn them into assertions.
 
 pub mod build;
+pub mod eval;
 pub mod print;
 pub mod program;
 pub mod types;

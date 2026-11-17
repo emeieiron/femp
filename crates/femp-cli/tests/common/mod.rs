@@ -54,3 +54,20 @@ pub fn project(relative: &str) -> Option<tempfile::TempDir> {
         None
     }
 }
+
+/// A project whose one module is the compiler's token fixture: a contract
+/// with a storage map, a broken invariant and message claims.
+#[allow(dead_code)]
+pub fn token_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    copy_dir(
+        &fixture("../femp-compiler/tests/fixtures/token"),
+        &dir.path().join("evm"),
+    );
+    fs::write(
+        dir.path().join("femp.toml"),
+        "[project]\nname = \"token\"\nversion = \"0.1.0\"\n\n[modules.contracts]\npath = \"evm\"\nplatform = \"evm\"\n",
+    )
+    .unwrap();
+    dir
+}

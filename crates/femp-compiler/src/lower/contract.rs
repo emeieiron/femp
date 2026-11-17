@@ -52,7 +52,10 @@ pub struct MessageRoot {
 pub struct LoweredMessage {
     /// The index of the message's arm among the contract's.
     pub arm: usize,
+    /// Takes the storage before the message, the storage after it when
+    /// `after` is set, the arm's parameters, then `params`.
     pub func: FuncId,
+    pub after: bool,
     pub params: Vec<Param>,
 }
 
@@ -940,6 +943,7 @@ fn wrap_message(
     LoweredMessage {
         arm: message.arm,
         func: lx.program.push(function),
+        after: message.after,
         params: every.into_iter().map(|(input, _)| input.param).collect(),
     }
 }
