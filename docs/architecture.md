@@ -153,9 +153,14 @@ one WebAssembly call that reads the sequence from a host file.
    their invariants or unrolls them · `simplify`. Blocks carry a mode, so that what an assumed
    invariant or a proved spec rules out is assumed rather than checked again.
 5. **Verification conditions** (`vc`): block reachability over the acyclic procedure. Integers
-   are SMT integers with range facts, wrapping by `mod`, truncating division, bitwise operations
-   through bit vectors; structs, enums and tuples are datatypes; arrays are SMT arrays; a
-   result a spec leaves open is an uninterpreted function of the arguments.
+   are SMT integers with range facts, wrapping by `mod`, truncating division; structs, enums and
+   tuples are datatypes; arrays are SMT arrays; a result a spec leaves open is an uninterpreted
+   function of the arguments. A shift by a known amount scales by a power of two, and a bitwise
+   operation with a known operand adds up the runs of ones of that operand, each a division and
+   a remainder (`vc/bits.rs`). Other bitwise operations and shifts go through bit vectors,
+   which the solver handles slowly at 256 bits, so such a script also has an approximate
+   prelude where each of them is only bounded, as every bit pattern bounds it; the solver tries
+   that first, and a query it rules out holds.
 6. **Solver** (`solver`): one `z3 -in -smt2` process per task, a fresh context per assertion
    (a context reused across queries is weaker on nonlinear arithmetic), a fixed seed and a
    per-query timeout. A satisfiable query's inputs are minimized by bisection on their distance

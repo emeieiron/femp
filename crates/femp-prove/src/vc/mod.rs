@@ -5,6 +5,7 @@
 //! under it, then assumed for what follows. A block parameter equals the
 //! argument of whichever edge was taken.
 
+mod bits;
 pub mod ints;
 mod sorts;
 mod terms;
@@ -22,6 +23,11 @@ use terms::{Definition, Terms, name};
 pub struct Script {
     pub prelude: String,
     pub obligations: Vec<Obligation>,
+    /// The prelude with each round trip through bit vectors replaced by
+    /// facts every bit pattern keeps, when there is one. It allows more
+    /// executions, so a query it rules out is ruled out, and the solver
+    /// decides it far faster.
+    pub approximate: Option<String>,
 }
 
 /// An assertion as a satisfiability query: a model of `violation` is an
@@ -36,7 +42,16 @@ pub struct Obligation {
 impl Script {
     /// The whole script as a file `z3 -smt2` can run, for `--keep-smt`.
     pub fn text(&self) -> String {
-        let mut out = self.prelude.clone();
+        self.with(&self.prelude)
+    }
+
+    /// The approximate script, when there is one.
+    pub fn approximate_text(&self) -> Option<String> {
+        self.approximate.as_ref().map(|prelude| self.with(prelude))
+    }
+
+    fn with(&self, prelude: &str) -> String {
+        let mut out = prelude.to_string();
         for obligation in &self.obligations {
             let _ = writeln!(
                 out,
@@ -49,6 +64,14 @@ impl Script {
 }
 
 pub fn encode(task: &Task) -> Result<Script, NotSupported> {
+    let mut script = encode_as(task, false)?;
+    if script.prelude.contains("int2bv") {
+        script.approximate = Some(encode_as(task, true)?.prelude);
+    }
+    Ok(script)
+}
+
+fn encode_as(task: &Task, approximate: bool) -> Result<Script, NotSupported> {
     let function = task.entry();
     if let Some(span) = cycle(function) {
         return Err(NotSupported::new(
@@ -71,10 +94,14 @@ pub fn encode(task: &Task) -> Result<Script, NotSupported> {
         .collect();
     out.push_str(&ints::prelude(&ints));
     let applied = declare_applied(function, &sorts, &mut out);
+    let constants = terms::constants(function);
     let terms = Terms {
         sorts: &sorts,
         function,
         applied: &applied,
+        shifted: terms::shifted(function, &constants),
+        constants,
+        approximate,
     };
     let mut encoder = Encoder {
         terms,
@@ -88,6 +115,7 @@ pub fn encode(task: &Task) -> Result<Script, NotSupported> {
     Ok(Script {
         prelude: encoder.out,
         obligations: encoder.obligations,
+        approximate: None,
     })
 }
 

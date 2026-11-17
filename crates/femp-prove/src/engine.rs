@@ -133,6 +133,9 @@ pub fn prove_with(
     };
     if let Some(path) = &dumps.smt {
         let _ = femp_core::artifact::write_file(path, script.text());
+        if let Some(text) = script.approximate_text() {
+            let _ = femp_core::artifact::write_file(&path.with_extension("approximate.smt2"), text);
+        }
     }
     let timeout = task.timeout.unwrap_or(config.timeout);
     match Z3::start(&config.solver) {
@@ -154,6 +157,14 @@ pub fn solve(
 ) -> Result<Verdict, String> {
     let mut unknown: Option<String> = None;
     for obligation in &script.obligations {
+        if let Some(approximate) = &script.approximate {
+            solver.reset()?;
+            solver.send(approximate)?;
+            solver.assert(&obligation.violation)?;
+            if solver.check(timeout / 4)? == Answer::Unsat {
+                continue;
+            }
+        }
         solver.reset()?;
         solver.send(&script.prelude)?;
         solver.assert(&obligation.violation)?;
