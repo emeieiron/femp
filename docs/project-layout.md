@@ -59,29 +59,26 @@ femp_spec = "../spec"
 
 ## Generated source
 
-A module can declare a named generator in `femp.toml`.
+A module can declare named generators in `femp.toml`:
 
 ~~~toml
 [modules.core.generate.serializers]
-command = ["my-serializer-generator", "--source", "src/models.fe", "--type", "Transfer"]
+command = ["my-serializer-generator", "--source", "src/models.fe"]
 output = "src/serializers.fe"
 ~~~
 
-`femp check`, `femp build`, `femp test`, and `femp package` run each declared generator
-once for each participating module before invoking a backend. FeMP starts the executable in the module's original
-directory, passes the arguments directly, and reads UTF-8 Fe source from standard output.
-Use standard error for diagnostics. A failing generator stops the command before compilation.
+`femp check`, `femp build`, `femp test`, `femp package`, `femp prop` and `femp prove` run
+each declared generator once for each participating module before invoking a backend. The
+generator runs in the module directory and prints Fe source, which FeMP writes to the declared
+path inside a private staged copy of the ingot. A failing generator stops the command before
+compilation.
 
-FeMP writes the source to the declared path inside the staged ingot. Each path must be a
-unique `.fe` destination under `src/` and must be absent from the original ingot. The staged
-ingots are private to the FeMP invocation and are removed when it finishes. FeMP writes
-platform artifacts and packages to their usual directories.
+Run `femp generate` to write the outputs into the source tree for code navigation and direct
+Fe tooling, and put those paths in the project's ignore list. `femp doctor` reports missing
+generator executables without running them.
 
-Run `femp generate` to create the configured outputs in their source locations for code
-navigation and direct Fe tooling. Put those generated paths in the project's ignore list.
-Subsequent FeMP builds refresh these copies when their generators run. The command protects
-authored files and requires its own generated header before replacing an existing file.
-`femp doctor` reports missing generator executables without running them.
+The full contract, which any generator can implement without depending on FeMP, is the
+[Fe Source Generator Protocol](source-generators.md).
 
 ## Shared and platform modules
 
