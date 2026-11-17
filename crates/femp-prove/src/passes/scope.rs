@@ -1,5 +1,6 @@
-//! Keeps the functions the task's entry reaches, and the specs that may
-//! stand in for any of them, and drops the rest.
+//! Keeps the functions the task's entry reaches, the specs that may stand
+//! in for any of them and the invariants a reached call back needs, and
+//! drops the rest.
 
 use std::collections::BTreeMap;
 
@@ -27,12 +28,22 @@ impl Pass for Scope {
                 }
                 next += 1;
             }
-            let wanted: Vec<FuncId> = task
+            let mut wanted: Vec<FuncId> = task
                 .summaries
                 .iter()
                 .filter(|summary| order.contains(&summary.target) && !order.contains(&summary.spec))
                 .map(|summary| summary.spec)
                 .collect();
+            if let Some(reentry) = &task.reentry
+                && order.contains(&reentry.func)
+            {
+                let invariants = reentry.checked.iter().map(|(func, _, _)| *func);
+                for func in invariants.chain(reentry.assumed.iter().map(|(func, _)| *func)) {
+                    if !order.contains(&func) && !wanted.contains(&func) {
+                        wanted.push(func);
+                    }
+                }
+            }
             if wanted.is_empty() {
                 break;
             }
@@ -67,6 +78,17 @@ impl Pass for Scope {
             summary.spec = renumbered[&summary.spec];
             summary.target = renumbered[&summary.target];
         }
+        // A task whose code never lets a callee call back needs no reentry.
+        task.reentry = task.reentry.take().and_then(|mut reentry| {
+            reentry.func = *renumbered.get(&reentry.func)?;
+            for (func, _, _) in &mut reentry.checked {
+                *func = renumbered[func];
+            }
+            for (func, _) in &mut reentry.assumed {
+                *func = renumbered[func];
+            }
+            Some(reentry)
+        });
         Ok(())
     }
 }

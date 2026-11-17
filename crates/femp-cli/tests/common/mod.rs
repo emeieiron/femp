@@ -59,14 +59,22 @@ pub fn project(relative: &str) -> Option<tempfile::TempDir> {
 /// with a storage map, a broken invariant and message claims.
 #[allow(dead_code)]
 pub fn token_project() -> tempfile::TempDir {
+    contract_project("token")
+}
+
+/// A project whose one module is one of the compiler's contract fixtures.
+#[allow(dead_code)]
+pub fn contract_project(name: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     copy_dir(
-        &fixture("../femp-compiler/tests/fixtures/token"),
+        &fixture(&format!("../femp-compiler/tests/fixtures/{name}")),
         &dir.path().join("evm"),
     );
     fs::write(
         dir.path().join("femp.toml"),
-        "[project]\nname = \"token\"\nversion = \"0.1.0\"\n\n[modules.contracts]\npath = \"evm\"\nplatform = \"evm\"\n",
+        format!(
+            "[project]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[modules.contracts]\npath = \"evm\"\nplatform = \"evm\"\n"
+        ),
     )
     .unwrap();
     dir

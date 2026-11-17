@@ -54,7 +54,35 @@ pub enum Model {
     Context(usize),
     /// Reads something the model leaves open.
     Unconstrained,
+    /// Calls another contract, whose answer is any value. A call that may
+    /// change state lets the callee call back into this contract first; one
+    /// that bubbles the callee's revert may revert.
+    Call { reenters: bool, bubbles: bool },
+    /// Runs another contract's code on this contract's storage.
+    Delegate,
 }
+
+/// Typed calls to other contracts, by their path in the library: whether
+/// the callee may change state, and whether its revert is bubbled.
+const CALLS: [(&str, bool, bool); 11] = [
+    ("evm::effects::Address::call", true, true),
+    ("evm::effects::Address::try_call", true, false),
+    ("evm::effects::Address::call_with_default", true, true),
+    ("evm::effects::Address::static", false, true),
+    ("evm::effects::Address::try_static", false, false),
+    ("evm::effects::Call::call", true, true),
+    ("evm::effects::Call::try_call", true, false),
+    ("evm::effects::Call::call_with_default", true, true),
+    ("evm::effects::Call::send_value", true, false),
+    ("evm::effects::Call::static", false, true),
+    ("evm::effects::Call::try_static", false, false),
+];
+
+const DELEGATES: [&str; 3] = [
+    "evm::effects::Call::delegate",
+    "evm::effects::Call::try_delegate",
+    "evm::effects::Call::raw_delegatecall",
+];
 
 pub fn model(db: &DriverDataBase, func: Func<'_>) -> Option<Model> {
     let path = std_path(db, func)?;
@@ -64,6 +92,15 @@ pub fn model(db: &DriverDataBase, func: Func<'_>) -> Option<Model> {
         | "evm::effects::revert_bytes"
         | "evm::effects::revert_empty" => Some(Model::Revert),
         "evm::effects::Log::emit" => Some(Model::Emit),
+        path if DELEGATES.contains(&path) => Some(Model::Delegate),
+        path if let Some((_, reenters, bubbles)) =
+            CALLS.iter().find(|(call, ..)| *call == path) =>
+        {
+            Some(Model::Call {
+                reenters: *reenters,
+                bubbles: *bubbles,
+            })
+        }
         _ => {
             let name = path.strip_prefix("evm::ops::")?;
             if let Some(index) = CONTEXT.iter().position(|(op, _)| *op == name) {
@@ -94,6 +131,7 @@ fn std_path(db: &DriverDataBase, func: Func<'_>) -> Option<String> {
             Partial::Present(owner) => Some(owner.data(db).to_string()),
             Partial::Absent => None,
         },
+        Some(ItemKind::Impl(item)) => item.target_type_name(db),
         _ => None,
     };
     Some(
@@ -111,6 +149,12 @@ fn std_path(db: &DriverDataBase, func: Func<'_>) -> Option<String> {
 /// with.
 pub fn is_evm(db: &dyn hir::analysis::HirAnalysisDb, ty: TyId<'_>) -> bool {
     is_std_struct(db, ty, "Evm")
+}
+
+/// Whether `ty` is `std::evm::CallOutcome`, of which the model keeps
+/// whether the call succeeded and not what it returned.
+pub fn is_call_outcome(db: &dyn hir::analysis::HirAnalysisDb, ty: TyId<'_>) -> bool {
+    is_std_struct(db, ty, "CallOutcome")
 }
 
 /// Whether `ty` is a `std::evm::StorageMap`, whose entries are all zero

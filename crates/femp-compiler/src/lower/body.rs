@@ -470,6 +470,81 @@ impl<'db> BodyLowering<'_, 'db> {
         Ok(self.fresh(ty.clone(), Expr::Make { ty, fields: parts }, span.clone()))
     }
 
+    /// Lets the contract a call reaches call back into this one: any of the
+    /// contract's messages may run in the meantime, from the storage as it
+    /// stands, so the storage afterwards is what those leave. The prover
+    /// gives the contract's `reenter` that meaning.
+    fn reenter(&mut self, name: &str, span: &Span) -> Lowering<()> {
+        let writes = match self.role {
+            Role::Handler { .. } => true,
+            Role::Function => self.shape.writes_state,
+        };
+        if self.state.is_none() || !writes {
+            return Err(self.unsupported(
+                span,
+                format!(
+                    "`{name}` calls another contract from a function that cannot write the contract's storage, which the callee could change by calling back"
+                ),
+            ));
+        }
+        let before = self.current_state(span)?;
+        let ty = self.function.ty(before).clone();
+        let func = self.lx.reentry(&ty, span);
+        let after = self.fresh(
+            ty,
+            Expr::Call {
+                func,
+                args: vec![before],
+            },
+            span.clone(),
+        );
+        self.store_state(after, span)
+    }
+
+    /// Reverts or goes on, as the callee chooses.
+    fn may_revert(&mut self, span: &Span) {
+        let reverted = self.fresh(Type::Bool, Expr::Havoc, span.clone());
+        let fail = self.function.new_block();
+        let next = self.function.new_block();
+        self.terminate(
+            Terminator::Branch {
+                cond: reverted,
+                then: Succ::to(fail),
+                otherwise: Succ::to(next),
+            },
+            span.clone(),
+        );
+        self.current = fail;
+        self.terminate(Terminator::Fail(PanicKind::Revert), span.clone());
+        self.current = next;
+    }
+
+    /// Writes each field of `state` to the field's slot.
+    fn store_state(&mut self, state: ValueId, span: &Span) -> Lowering<()> {
+        let Type::Tuple(fields) = self.function.ty(state).clone() else {
+            return Err(self.unsupported(span, "storage that is not a tuple of fields"));
+        };
+        for (index, (slot, ty)) in self.storage.clone().into_iter().zip(fields).enumerate() {
+            let value = self.fresh(
+                ty,
+                Expr::Project {
+                    value: state,
+                    path: vec![Proj::Field(index as u16)],
+                },
+                span.clone(),
+            );
+            self.push(
+                StmtKind::Store {
+                    slot,
+                    path: Vec::new(),
+                    value,
+                },
+                span.clone(),
+            );
+        }
+        Ok(())
+    }
+
     /// The storage as it stands in the body's slots.
     fn current_state(&mut self, span: &Span) -> Lowering<ValueId> {
         let state = self
@@ -923,6 +998,24 @@ impl<'db> BodyLowering<'_, 'db> {
                     }
                 }
                 evm::Model::Unconstrained => Expr::Havoc,
+                evm::Model::Call { reenters, bubbles } => {
+                    self.lx.calls_out = true;
+                    if reenters {
+                        self.reenter(&name, &span)?;
+                    }
+                    if bubbles {
+                        self.may_revert(&span);
+                    }
+                    Expr::Havoc
+                }
+                evm::Model::Delegate => {
+                    return Err(self.unsupported(
+                        &span,
+                        format!(
+                            "`{name}` runs another contract's code on this contract's storage, which the prover does not model"
+                        ),
+                    ));
+                }
             };
             self.define(dst, expr, span);
             return Ok(());
@@ -1070,27 +1163,7 @@ impl<'db> BodyLowering<'_, 'db> {
                 },
                 span.clone(),
             );
-            let Type::Tuple(fields) = parts[last].clone() else {
-                return Err(self.unsupported(&span, "storage that is not a tuple of fields"));
-            };
-            for (index, (slot, ty)) in self.storage.clone().into_iter().zip(fields).enumerate() {
-                let value = self.fresh(
-                    ty,
-                    Expr::Project {
-                        value: state,
-                        path: vec![Proj::Field(index as u16)],
-                    },
-                    span.clone(),
-                );
-                self.push(
-                    StmtKind::Store {
-                        slot,
-                        path: Vec::new(),
-                        value,
-                    },
-                    span.clone(),
-                );
-            }
+            self.store_state(state, &span)?;
         }
         Ok(())
     }

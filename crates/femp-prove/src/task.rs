@@ -22,6 +22,26 @@ pub struct Task {
     /// The specs whose summaries the task used, which must hold for its
     /// result to.
     pub relies_on: Vec<String>,
+    /// What a contract's call to another contract that may call back
+    /// means; without it, the callee leaves the storage alone.
+    pub reentry: Option<Reentry>,
+}
+
+/// A contract's call to another contract that may call back into it. The
+/// callee may send the contract any of its messages first, each of which
+/// keeps the invariants, so the storage afterwards is any storage they
+/// allow. Where a task proves the invariants, they must hold at the call
+/// too, since those messages start from the storage as it stands.
+#[derive(Debug, Clone)]
+pub struct Reentry {
+    /// The contract's `reenter`, which its code calls with its storage.
+    pub func: FuncId,
+    /// Each invariant, its name and the arguments it is checked at, at the
+    /// call; empty where the task assumes the invariants.
+    pub checked: Vec<(FuncId, String, Vec<ValueId>)>,
+    /// Each invariant at each argument list the storage afterwards is
+    /// assumed to satisfy it at.
+    pub assumed: Vec<(FuncId, Vec<ValueId>)>,
 }
 
 /// A `#[spec]` function and the function it describes.
@@ -44,6 +64,7 @@ impl Task {
             summaries: Vec::new(),
             proving: None,
             relies_on: Vec::new(),
+            reentry: None,
         }
     }
 

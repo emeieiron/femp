@@ -638,7 +638,7 @@ impl Builder {
     }
 
     fn storage_invariant(&mut self, file: &Path, path: &[String], function: &RawFn) {
-        let options = self.options(file, &function.attrs, "invariant", &["contract"]);
+        let options = self.options(file, &function.attrs, "invariant", &["of"]);
         if function.has_self
             || function.generic
             || function.result.as_deref() != Some("bool")
@@ -661,7 +661,7 @@ impl Builder {
                     line: function.line,
                 },
             },
-            options.get("contract").cloned(),
+            options.get("of").cloned(),
         ));
     }
 
@@ -670,7 +670,7 @@ impl Builder {
             MessageKind::Ensures => "ensures",
             MessageKind::Reverts => "reverts",
         };
-        let options = self.options(file, &function.attrs, marker, &["message", "contract"]);
+        let options = self.options(file, &function.attrs, marker, &["message", "of"]);
         let Some(message) = options.get("message").cloned() else {
             self.error(
                 file,
@@ -705,7 +705,7 @@ impl Builder {
                     line: function.line,
                 },
             },
-            options.get("contract").cloned(),
+            options.get("of").cloned(),
         ));
     }
 
@@ -730,7 +730,7 @@ impl Builder {
                     .to_string()
             }
             (_, _) => "this module declares several contracts; name one with \
-                 `contract = \"Name\"`"
+                 `of = \"Name\"`"
                 .to_string(),
         };
         let (file, line) = (location.file.clone(), location.line);

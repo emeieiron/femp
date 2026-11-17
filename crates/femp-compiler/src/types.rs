@@ -11,7 +11,7 @@ use hir::analysis::ty::adt_def::AdtRef;
 use hir::analysis::ty::ty_def::{CapabilityKind, PrimTy, TyId};
 use hir::hir_def::{EnumVariant, Partial};
 
-use crate::lower::evm::{CONTEXT, is_evm, is_storage_map};
+use crate::lower::evm::{CONTEXT, is_call_outcome, is_evm, is_storage_map};
 
 pub(crate) struct Types<'db> {
     pub table: TypeTable,
@@ -77,6 +77,16 @@ impl<'db> Types<'db> {
                 key: Box::new(self.lower(db, instance, *key)?),
                 value: Box::new(self.lower(db, instance, *value)?),
             });
+        }
+        if is_call_outcome(db, ty) {
+            let id = self.table.push(TypeDef::Struct {
+                name: "CallOutcome".to_string(),
+                fields: vec![Field {
+                    name: "success".to_string(),
+                    ty: Type::Bool,
+                }],
+            });
+            return Ok(Type::Adt(id));
         }
         if let Some(def) = ty.adt_def(db) {
             let name = ty.pretty_print(db).to_string();

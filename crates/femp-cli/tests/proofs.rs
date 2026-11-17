@@ -333,3 +333,46 @@ fn contract_refutations_are_checked_on_the_deployed_storage() {
     assert!(entry(&report, "contracts::transfer_moves_tokens").starts_with("PROVED"));
     assert!(entry(&report, "contracts::mint_reverts").starts_with("PROVED"));
 }
+
+#[test]
+fn callees_that_may_call_back_are_part_of_the_proof() {
+    if !solver_available() {
+        return;
+    }
+    let project = common::contract_project("vault");
+    let output = femp(project.path(), &["prove"]);
+    let report = stdout(&output);
+    assert!(!output.status.success(), "{report}");
+
+    assert!(
+        entry(&report, "contracts::Vault").starts_with("PROVED"),
+        "{report}"
+    );
+    let late = entry(&report, "contracts::LateVault");
+    assert!(late.starts_with("UNKNOWN"), "{late}");
+    assert!(
+        late.contains("`Pay` calls another contract, which may call back first"),
+        "{late}"
+    );
+    let eager = entry(&report, "contracts::EagerVault");
+    assert!(
+        eager.contains(
+            "`Pay` calls another contract at evm/src/lib.fe:92, which can call back while `eager_paid_within_limit` does not hold"
+        ),
+        "{eager}"
+    );
+    let counts = entry(&report, "contracts::pay_counts");
+    assert!(counts.starts_with("UNKNOWN"), "{counts}");
+    let reverts = entry(&report, "contracts::pay_reverts");
+    assert!(reverts.starts_with("REFUTED"), "{reverts}");
+    assert!(
+        reverts.contains("`Pay` reverts (revert) at evm/src/lib.fe:40"),
+        "{reverts}"
+    );
+    assert!(
+        reverts.contains(
+            "not replayed on evm: `Pay` calls another contract, whose answers the search chose"
+        ),
+        "{reverts}"
+    );
+}

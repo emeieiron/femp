@@ -1,0 +1,130 @@
+use std::evm::{Address, Call, revert_error}
+
+/// What a vault sends the account it pays.
+msg PayeeMsg {
+    #[selector = sol("receive(uint256)")]
+    Receive { amount: u256 } -> bool,
+    #[selector = sol("ready()")]
+    Ready -> bool,
+}
+
+msg VaultMsg {
+    #[selector = sol("pay(uint256)")]
+    Pay { amount: u256 } -> bool,
+    #[selector = sol("ready()")]
+    Ready -> bool,
+}
+
+#[error]
+pub struct OverLimit { pub amount: u256 }
+
+pub struct VaultStore { pub payee: Address, pub limit: u256, pub paid: u256 }
+
+/// Counts a payment before it hands it over.
+pub contract Vault uses (call: mut Call) {
+    mut store: VaultStore,
+
+    init(payee: Address, limit: u256)
+    uses (mut store)
+    {
+        store.payee = payee
+        store.limit = limit
+    }
+
+    recv VaultMsg {
+        Pay { amount } -> bool uses (mut store, mut call) {
+            if amount > store.limit - store.paid {
+                revert_error(OverLimit { amount })
+            }
+            store.paid = store.paid + amount
+            store.payee.call(PayeeMsg::Receive { amount })
+        }
+
+        Ready -> bool uses (store, call) {
+            store.payee.static(PayeeMsg::Ready {})
+        }
+    }
+}
+
+/// Hands a payment over before it counts it: the payee can call back and
+/// be paid again first.
+pub contract LateVault uses (call: mut Call) {
+    mut store: VaultStore,
+
+    init(payee: Address, limit: u256)
+    uses (mut store)
+    {
+        store.payee = payee
+        store.limit = limit
+    }
+
+    recv VaultMsg {
+        Pay { amount } -> bool uses (mut store, mut call) {
+            if amount > store.limit - store.paid {
+                revert_error(OverLimit { amount })
+            }
+            let accepted = store.payee.call(PayeeMsg::Receive { amount })
+            store.paid = store.paid + amount
+            accepted
+        }
+
+        Ready -> bool uses (store, call) {
+            store.payee.static(PayeeMsg::Ready {})
+        }
+    }
+}
+
+/// Counts a payment first and checks the limit only after handing it
+/// over, so the payee sees the vault past its limit.
+pub contract EagerVault uses (call: mut Call) {
+    mut store: VaultStore,
+
+    init(payee: Address, limit: u256)
+    uses (mut store)
+    {
+        store.payee = payee
+        store.limit = limit
+    }
+
+    recv VaultMsg {
+        Pay { amount } -> bool uses (mut store, mut call) {
+            store.paid = store.paid + amount
+            let accepted = store.payee.call(PayeeMsg::Receive { amount })
+            if store.paid > store.limit {
+                revert_error(OverLimit { amount })
+            }
+            accepted
+        }
+
+        Ready -> bool uses (store, call) {
+            store.payee.static(PayeeMsg::Ready {})
+        }
+    }
+}
+
+#[invariant(of = "Vault")]
+fn paid_within_limit(store: VaultStore) -> bool {
+    store.paid <= store.limit
+}
+
+#[invariant(of = "LateVault")]
+fn late_paid_within_limit(store: VaultStore) -> bool {
+    store.paid <= store.limit
+}
+
+#[invariant(of = "EagerVault")]
+fn eager_paid_within_limit(store: VaultStore) -> bool {
+    store.paid <= store.limit
+}
+
+/// What `Pay` counts, unless the payee calls back while it is paid.
+#[ensures(message = "Pay", of = "Vault")]
+fn pay_counts(store: VaultStore, store_after: VaultStore, amount: u256) -> bool {
+    store_after.paid == store.paid + amount
+}
+
+/// False: the payee can revert too, which `Pay` passes on.
+#[reverts(message = "Pay", of = "Vault")]
+fn pay_reverts(store: VaultStore, amount: u256) -> bool {
+    amount > store.limit - store.paid
+}

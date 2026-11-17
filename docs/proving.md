@@ -123,7 +123,7 @@ fn claims_stay_within_total(store: VestingStore) -> bool {
 }
 ```
 
-When a module declares several contracts, `#[invariant(contract = "Name")]` says which one.
+When a module declares several contracts, `#[invariant(of = "Name")]`, and `of` on `#[ensures]` and `#[reverts]`, say which one.
 
 A parameter that is not a field ranges over every value of its type, so an invariant can speak
 of every entry of a `StorageMap`:
@@ -156,6 +156,46 @@ The contract is proved as a machine whose state is its storage:
   them, which a proof establishes, but an induction that needs other entries comes back unknown.
 - An `Address` is chosen as the 160-bit number it holds, as are `ctx.caller`, `ctx.origin`,
   `ctx.address` and `ctx.coinbase`.
+- A call to another contract (`call`, `try_call`, `call_with_default`, `send_value`, `static`
+  and `try_static`, on an `Address` or through `Call`) answers any value, and `call`,
+  `call_with_default` and `static` may revert as the callee does. A call that may change state
+  lets the callee call back first: any of the contract's messages can run from the storage as
+  it stands at the call, so the invariants must hold there, and the storage afterwards is any
+  storage the invariants allow. While `init` runs the contract has no code, so nothing calls
+  back into it.
+
+### Calls to other contracts
+
+Counting a payment before handing it over keeps the invariant even if the payee calls back,
+and is proved. Handing it over first is not:
+
+```fe
+Pay { amount } -> bool uses (mut store, mut call) {
+    if amount > store.limit - store.paid {
+        revert_error(OverLimit { amount })
+    }
+    let accepted = store.payee.call(PayeeMsg::Receive { amount })
+    store.paid = store.paid + amount
+    accepted
+}
+```
+
+```
+UNKNOWN     contracts::LateVault  invariant `late_paid_within_limit` fails after `Pay` from (VaultStore { ... }), amount = 1
+            `Pay` calls another contract, which may call back first; the search tries callees that do not, and no sequence of up to 6 messages from `init` breaks it
+```
+
+A payee that calls `Pay` again while it is being paid is paid twice for one check of the
+limit. The search from deployment answers each call with values it chooses but never calls
+back, so it cannot show that sequence, and the claim is unknown rather than refuted. A contract
+that breaks an invariant before a call and restores it afterwards is reported at the call:
+
+```
+UNKNOWN     contracts::EagerVault  `Pay` calls another contract at evm/src/lib.fe:92, which can call back while `eager_paid_within_limit` does not hold, from (...)
+```
+
+A sequence that goes through a call is not replayed: on the EVM the callee is an account
+without code, which answers otherwise than the search chose.
 
 If induction fails, a bounded search from deployment looks for a sequence of up to `--steps`
 messages, in which block time and number never decrease. A sequence it finds refutes the
@@ -312,8 +352,11 @@ package manager.
 - Effects are modeled where a contract provides them: its storage, which any function it is
   passed to may write, the EVM context, and values bound with `with`.
 - A contract's messages, `init` and invariants may range over integers, `bool` and `Address`
-  only. Calls to other contracts, creating contracts and raw storage access are not supported
-  yet. An invariant cannot sum a map's entries.
+  only. Creating contracts, delegate calls, raw calls and raw storage access are not supported
+  yet. A call that may change state must be made where the contract's storage can be written:
+  in a handler, or in a function that writes the storage. A callee's revert data and returned
+  bytes are not modeled, only its typed answer and whether it succeeded. An invariant cannot
+  sum a map's entries.
 - A replayed sequence cannot choose `ctx.address`, `ctx.origin`, `ctx.selfbalance` or
   `ctx.blobbasefee`, which the EVM decides. The replay reads a map's entries at the values the
   sequence names; entries at keys it computes, such as a hash, read as zero.

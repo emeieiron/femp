@@ -71,6 +71,7 @@ pub fn contract_machine(claim: &StorageClaim, contract: &LoweredContract) -> (Ma
         handler(&contract.init),
         &arms,
         &invariants,
+        contract.reenter,
     )
 }
 
@@ -131,6 +132,9 @@ pub struct ContractSide {
     pub state: Type,
     pub layout: Result<StorageLayout, String>,
     pub invariants: Vec<ClaimFn>,
+    /// The handlers that call other contracts, whose answers the proof
+    /// leaves open.
+    pub calls_out: Vec<String>,
 }
 
 impl ContractSide {
@@ -155,6 +159,11 @@ impl ContractSide {
                     func: lowered.func,
                     params: lowered.params.clone(),
                 })
+                .collect(),
+            calls_out: std::iter::once(&contract.init)
+                .chain(&contract.arms)
+                .filter(|handler| handler.calls_out)
+                .map(|handler| handler.name.clone())
                 .collect(),
         }
     }

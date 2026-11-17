@@ -455,7 +455,7 @@ fn within_cap(store: LedgerStore) -> bool {
     store.total <= store.cap
 }
 
-#[invariant(contract = "Ledger")]
+#[invariant(of = "Ledger")]
 fn cap_is_set(store: LedgerStore) -> bool {
     true
 }
@@ -482,7 +482,7 @@ fn an_invariant_needs_its_contract() {
     assert!(errors[0].contains("declares no contract"), "{errors:?}");
 
     let named = format!(
-        "{LEDGER}\n#[invariant(contract = \"Vault\")]\nfn other(store: LedgerStore) -> bool {{ true }}\n"
+        "{LEDGER}\n#[invariant(of = \"Vault\")]\nfn other(store: LedgerStore) -> bool {{ true }}\n"
     );
     let errors = claims(&[("lib.fe", &named)]).unwrap_err();
     assert!(errors[0].contains("no contract `Vault`"), "{errors:?}");
