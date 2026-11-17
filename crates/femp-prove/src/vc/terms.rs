@@ -4,8 +4,8 @@ use femp_vir::{
     Arith, BinOp, Const, Expr, Function, Index, Intrinsic, Proj, Type, TypeDef, UnOp, ValueId,
 };
 
-use super::ints;
 use super::sorts::Sorts;
+use super::{bits, ints};
 use crate::task::NotSupported;
 
 /// What defining a value asserts: that it equals a term, that each of
@@ -24,6 +24,59 @@ pub struct Terms<'a> {
     pub function: &'a Function,
     /// The uninterpreted function of each name `Expr::Apply` uses.
     pub applied: &'a std::collections::BTreeMap<String, String>,
+    /// The integer constants of the function, by the value they define.
+    pub constants: std::collections::BTreeMap<ValueId, femp_core::property::Value>,
+    /// The values shifted left by a known amount, whose low bits are zero.
+    pub shifted: std::collections::BTreeMap<ValueId, u16>,
+    /// Whether round trips through bit vectors give way to their bounds.
+    pub approximate: bool,
+}
+
+/// The values of `function` shifted left by a known amount below their
+/// width, with that amount.
+pub fn shifted(
+    function: &Function,
+    constants: &std::collections::BTreeMap<ValueId, femp_core::property::Value>,
+) -> std::collections::BTreeMap<ValueId, u16> {
+    function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.stmts)
+        .filter_map(|stmt| match &stmt.kind {
+            femp_vir::StmtKind::Def {
+                dst,
+                expr:
+                    Expr::Binary {
+                        op: BinOp::Shl,
+                        lhs,
+                        rhs,
+                    },
+            } => {
+                let (bits, _) = function.ty(*lhs).int_shape()?;
+                let amount = constants.get(rhs)?.bits();
+                (amount < femp_core::property::U256::from(bits)).then(|| (*dst, amount.to::<u16>()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The values of `function` that integer constants define.
+pub fn constants(
+    function: &Function,
+) -> std::collections::BTreeMap<ValueId, femp_core::property::Value> {
+    function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.stmts)
+        .filter_map(|stmt| match &stmt.kind {
+            femp_vir::StmtKind::Def {
+                dst,
+                expr: Expr::Const(Const::Int(value)),
+            } => Some((*dst, *value)),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn name(value: ValueId) -> String {
@@ -43,6 +96,11 @@ impl Terms<'_> {
     }
 
     pub fn define(&self, dst: ValueId, expr: &Expr) -> Result<Definition, NotSupported> {
+        if let Expr::Binary { op, lhs, rhs } = expr
+            && let Some(facts) = self.bounded(dst, *op, *lhs, *rhs)?
+        {
+            return Ok(Definition::Facts(facts));
+        }
         let term = match expr {
             Expr::Use(value) => name(*value),
             Expr::Const(constant) => match constant {
@@ -290,6 +348,44 @@ impl Terms<'_> {
         })
     }
 
+    /// An operation that takes a round trip through bit vectors: the round
+    /// trip, or in an approximate encoding only that the result is well
+    /// formed, and for unsigned values the bounds every bit pattern keeps.
+    fn bounded(
+        &self,
+        dst: ValueId,
+        op: BinOp,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> Result<Option<Vec<String>>, NotSupported> {
+        if *self.ty(lhs) == Type::Bool || self.ty(lhs).int_shape().is_none() {
+            return Ok(None);
+        }
+        let term = self.binary(op, lhs, rhs)?;
+        if !term.contains("int2bv") {
+            return Ok(None);
+        }
+        let result = name(dst);
+        let (a, b) = (name(lhs), name(rhs));
+        let mut facts = if self.approximate {
+            self.sorts.wf(self.ty(dst), &result).into_iter().collect()
+        } else {
+            vec![format!("(= {result} {term})")]
+        };
+        if matches!(self.ty(lhs).int_shape(), Some((_, true))) {
+            return Ok(Some(facts));
+        }
+        facts.extend(bits::bounds(op, &result, &a, &b));
+        for (shifted, other) in [(lhs, &b), (rhs, &a)] {
+            if let Some(zeros) = self.shifted.get(&shifted)
+                && let Some(fact) = bits::disjoint(op, &result, other, &name(shifted), *zeros)
+            {
+                facts.push(fact);
+            }
+        }
+        Ok(Some(facts))
+    }
+
     fn binary(&self, op: BinOp, lhs: ValueId, rhs: ValueId) -> Result<String, NotSupported> {
         let (a, b) = (name(lhs), name(rhs));
         let ty = self.ty(lhs);
@@ -315,6 +411,23 @@ impl Terms<'_> {
             Arith::Wrapping => ints::wrap(bits, signed, &term),
             Arith::Exact | Arith::Checked => term,
         };
+        let known = |value: ValueId| self.constants.get(&value).map(|value| value.bits());
+        if matches!(op, BinOp::Shl | BinOp::Shr)
+            && let Some(amount) = known(rhs)
+            && let Some(term) = bits::shift(op, bits, signed, &a, amount)
+        {
+            return Ok(term);
+        }
+        if matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) {
+            let found = match (known(lhs), known(rhs)) {
+                (_, Some(mask)) => bits::with_known(op, bits, signed, &a, mask),
+                (Some(mask), None) => bits::with_known(op, bits, signed, &b, mask),
+                (None, None) => None,
+            };
+            if let Some(term) = found {
+                return Ok(term);
+            }
+        }
         let bitwise = |operator: &str| {
             ints::from_bits(
                 bits,

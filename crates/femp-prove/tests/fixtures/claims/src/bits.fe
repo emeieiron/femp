@@ -1,0 +1,30 @@
+/// Holds: two halves packed into one word come back out.
+#[property]
+pub fn packs_and_unpacks(high: u128, low: u128) -> bool {
+    let word = ((high as u256) << 128) | (low as u256)
+    (word >> 128) == high as u256 && (word & 0xffffffffffffffffffffffffffffffff) == low as u256
+}
+
+/// Holds: a mask keeps no more than either side.
+#[property]
+pub fn masks_shrink(x: u256, y: u256) -> bool {
+    (x & y) <= y && (x | y) >= x
+}
+
+/// Holds: an arithmetic shift rounds toward negative infinity.
+#[property]
+pub fn halving_rounds_down(x: i64) -> bool {
+    x < 0 || (x >> 1) <= x
+}
+
+/// Holds: a known mask picks bits out exactly.
+#[property]
+pub fn known_masks_are_exact(x: u256) -> bool {
+    (x & 0xff00) % 256 == 0 && (x | 1) % 2 == 1 && ((x << 8) >> 8) == x % (1 << 248)
+}
+
+/// Fails at 1 and 2: `x ^ y` can exceed both.
+#[property]
+pub fn xor_stays_below_the_larger(x: u8, y: u8) -> bool {
+    (x ^ y) <= x || (x ^ y) <= y
+}

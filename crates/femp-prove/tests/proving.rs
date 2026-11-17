@@ -120,6 +120,11 @@ fn proves_and_refutes_the_fixture() {
         search_budget: Duration::from_secs(60),
         unroll: 8,
     };
+    let names: Vec<String> = properties().into_iter().map(|p| p.name).collect();
+    assert!(
+        names.iter().any(|name| name == "packs_and_unpacks"),
+        "{names:?}"
+    );
     for target in ["evm", "native", "wasm"] {
         for (declared, task) in tasks(target) {
             let verdict = femp_prove::prove(task, &config, &Dumps::default()).verdict;
@@ -150,6 +155,21 @@ fn proves_and_refutes_the_fixture() {
                     | "total_of_eight_is_bounded",
                     Verdict::Proved,
                 ) => {}
+                (
+                    "packs_and_unpacks"
+                    | "masks_shrink"
+                    | "halving_rounds_down"
+                    | "known_masks_are_exact",
+                    Verdict::Proved,
+                ) => {}
+                ("xor_stays_below_the_larger", Verdict::Refuted(refutation)) => {
+                    let shown: Vec<&str> = refutation
+                        .shown
+                        .iter()
+                        .map(|(_, value)| value.as_str())
+                        .collect();
+                    assert_eq!(shown, ["1", "2"]);
+                }
                 ("counts_many", Verdict::Refuted(refutation)) => {
                     assert_eq!(refutation.check, Check::Unwind);
                 }

@@ -326,7 +326,7 @@ supported. Reports contain no timings, so equal runs give equal reports.
 | `PROVED` | The claim holds for every input, on the targets listed. |
 | `REFUTED` | A counterexample breaks it. It was minimized toward the simplest inputs, in the order `femp prop` shrinks to, then run on the compiled targets and saved under `regressions/`. |
 | `UNKNOWN` | The solver ran out of time, a loop may run longer than it was unrolled, a spec's `requires` may not hold where it stands in, or a machine or contract is not inductive. The reason says which. |
-| `UNSUPPORTED` | The claim reaches code the prover has no model for, such as effects, storage, mutable borrows or recursion. The location is reported. |
+| `UNSUPPORTED` | The claim reaches code the prover has no model for, such as raw pointers, delegate calls or recursion. The location is reported. |
 | `SKIPPED` | A trusted spec, which is assumed rather than proved. |
 
 A counterexample the compiled targets do not reproduce means the proof's model of the code and
@@ -335,6 +335,17 @@ exists because a spec leaves the result open, in which case the claim is unknown
 
 The report ends with what the run took on trust: trusted specs, and generators the prover
 cannot read as a set of values, which it replaces by the whole type.
+
+### Arithmetic
+
+Integers are mathematical integers with their type's range, so multiplication, division and
+remainder of 256-bit values are decided as integer arithmetic: `a * b / b == a` where the product
+fits, or `total * part / whole <= total` for `part <= whole`. Shifts by a constant and bitwise
+operations with a constant operand, such as masks and packed fields, are exact integer
+arithmetic too. A bitwise operation on two unknown values, or a shift by an unknown amount, is
+first tried with only the bounds every bit pattern keeps (`x & y` is at most `x` and `y`,
+`x | y` at least either, and `|` adds when one side is shifted past the other), and exactly
+when those do not decide it.
 
 ## Installing Z3
 
@@ -350,7 +361,7 @@ package manager.
   returns a mutable borrow is not supported. Raw pointers, strings and recursion are reported as
   not supported.
 - Effects are modeled where a contract provides them: its storage, which any function it is
-  passed to may write, the EVM context, and values bound with `with`.
+  passed to may write, the EVM context, calls to other contracts, and values bound with `with`.
 - A contract's messages, `init` and invariants may range over integers, `bool` and `Address`
   only. Creating contracts, delegate calls, raw calls and raw storage access are not supported
   yet. A call that may change state must be made where the contract's storage can be written:
