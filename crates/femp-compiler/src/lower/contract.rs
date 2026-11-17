@@ -73,6 +73,9 @@ pub struct LoweredContract {
     pub invariants: Vec<Invariant>,
     /// Each message claim, or why it cannot be lowered.
     pub messages: Vec<Result<LoweredMessage, Unsupported>>,
+    /// The function the storage goes through where the contract calls
+    /// another that may call back; it passes the storage on unchanged.
+    pub reenter: Option<FuncId>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +90,9 @@ pub struct Handler {
     pub payable: bool,
     /// The selector an arm is called with.
     pub selector: Option<u32>,
+    /// Whether the handler calls other contracts, whose answers are any
+    /// value.
+    pub calls_out: bool,
 }
 
 /// A value the solver chooses for a handler or an invariant: what the
@@ -387,7 +393,7 @@ impl<'db> Lowerer<'db> {
             state,
             bindings,
         };
-        match super::body::lower(self, instance, name, role) {
+        match self.lower_body(id, instance, name, role) {
             Ok(function) => *self.program.function_mut(id) = function,
             Err(error) => {
                 self.failed.insert(id, error.clone());
@@ -639,6 +645,7 @@ impl Lowering {
                     context: 0,
                     payable: false,
                     selector: None,
+                    calls_out: false,
                 }
             }
         };
@@ -717,6 +724,7 @@ impl Lowering {
                 }
             })
             .collect();
+        let reenter = lx.reentry_of(&self.state);
         LoweredContract {
             state: self.state,
             fields: self.fields,
@@ -724,6 +732,7 @@ impl Lowering {
             arms,
             invariants,
             messages,
+            reenter,
         }
     }
 }
@@ -831,12 +840,42 @@ fn wrap_handler(
     cursor.terminate(femp_vir::Terminator::Return(next));
     Handler {
         name: pending.name.clone(),
+        calls_out: reaches(&lx.program, pending.func, &lx.outside),
         func: lx.program.push(function),
         context: context.len(),
         params,
         payable: pending.payable,
         selector: pending.selector,
     }
+}
+
+/// Whether `root` calls, directly or through others, one of `targets`.
+fn reaches(program: &femp_vir::Program, root: FuncId, targets: &BTreeSet<FuncId>) -> bool {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if targets.contains(&id) {
+            return true;
+        }
+        if !seen.insert(id) {
+            continue;
+        }
+        for stmt in program
+            .function(id)
+            .blocks
+            .iter()
+            .flat_map(|block| &block.stmts)
+        {
+            if let femp_vir::StmtKind::Def {
+                expr: Expr::Call { func, .. },
+                ..
+            } = &stmt.kind
+            {
+                stack.push(*func);
+            }
+        }
+    }
+    false
 }
 
 /// A message claim as a function of the storage before and after, the

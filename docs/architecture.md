@@ -174,7 +174,11 @@ storage it is passed, returns their final values after its result, and its calle
 back to the places they lent, which the borrow checker keeps anyone else from reaching. A
 `StorageMap` is an SMT array from keys to values, zero where no one wrote.
 The machine obligations run its handlers in trusted blocks, where a panic, which reverts the
-transaction, ends the execution instead of failing it.
+transaction, ends the execution instead of failing it. A call to another contract answers any
+value; one that may change state passes the storage through the contract's `reenter`, which
+leaves it unchanged unless a task says otherwise. An induction step's task does: the inliner
+(`passes/inline.rs`) checks the invariants of the storage at the call and continues from any
+storage that satisfies them, which is what any number of messages a callee sends back leaves.
 
 The compiled contract judges both commands' runs (`femp-cli/src/contracts.rs`). The platform's
 `deployer` builds a module's contracts once and runs sequences of transactions on fresh

@@ -305,6 +305,9 @@ pub enum Check {
     Precondition(String),
     /// A loop may run more often than it was unrolled.
     Unwind,
+    /// The named invariant may not hold where a contract calls another
+    /// contract, which can call back into it.
+    Reentry(String),
 }
 
 impl fmt::Display for Check {
@@ -315,6 +318,10 @@ impl fmt::Display for Check {
             Self::Ensures => f.write_str("an `ensures` does not hold"),
             Self::Precondition(spec) => write!(f, "the precondition of `{spec}` may not hold"),
             Self::Unwind => f.write_str("loop exceeds its unrolling"),
+            Self::Reentry(name) => write!(
+                f,
+                "invariant `{name}` may not hold where the contract calls another contract, which can call back"
+            ),
         }
     }
 }

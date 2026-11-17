@@ -334,6 +334,7 @@ fn machine_fns(
         invariants: take(machine.invariants.len())?,
         observations: take(machine.observations.len())?,
         reverts: false,
+        reenter: None,
     })
 }
 

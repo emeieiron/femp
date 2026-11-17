@@ -263,6 +263,24 @@ impl Replayer<'_> {
                 continue;
             };
             let last_goes_through = *last_goes_through;
+            // What a callee answers is the search's choice, which a replay
+            // against accounts without code cannot give.
+            let calling = item.plan.contract.as_ref().and_then(|side| {
+                std::iter::once(&machine.init.name)
+                    .chain(
+                        sequence
+                            .steps
+                            .iter()
+                            .map(|step| &machine.commands[step.command].method.name),
+                    )
+                    .find(|name| side.calls_out.contains(name))
+            });
+            if let Some(name) = calling {
+                item.report.notes.push(format!(
+                    "not replayed on {label}: `{name}` calls another contract, whose answers the search chose"
+                ));
+                continue;
+            }
             let storage = item.plan.contract.as_ref().map(|side| {
                 let named = sequence
                     .init

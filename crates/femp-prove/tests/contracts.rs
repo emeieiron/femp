@@ -72,6 +72,7 @@ fn prove(fixture_name: &str, name: &str, invariant: &str, config: &Config) -> Pr
             &contract.invariants[0].params,
             contract.invariants[0].func,
         )],
+        contract.reenter,
     );
     let program = &lowered.program;
     let run = |task: Task| femp_prove::prove(task, config, &Dumps::default()).verdict;
@@ -231,6 +232,7 @@ fn prove_message(
             &invariant.params,
             invariant.func,
         )],
+        contract.reenter,
     );
     let claim_fn = MessageFn {
         name: claim,
@@ -322,4 +324,60 @@ fn refutes_a_revert_condition_with_a_real_sequence() {
     // A transfer by someone who holds nothing returns `false`.
     let sequence = sequence.expect("a sequence from deployment");
     assert_eq!(sequence.steps.len(), 1);
+}
+
+fn step<'p>(proof: &'p Proof, message: &str) -> &'p Verdict {
+    proof
+        .steps
+        .iter()
+        .find(|(name, _)| name == message)
+        .map(|(_, verdict)| verdict)
+        .unwrap_or_else(|| panic!("no message `{message}`"))
+}
+
+#[test]
+fn a_contract_that_counts_before_it_calls_out_keeps_its_invariant() {
+    let Some(config) = config() else {
+        return;
+    };
+    let proof = prove("vault", "Vault", "paid_within_limit", &config);
+    assert!(proof.init.is_proved(), "{:?}", proof.init);
+    for (name, verdict) in &proof.steps {
+        assert!(verdict.is_proved(), "{name}: {verdict:?}");
+    }
+}
+
+#[test]
+fn a_callee_that_calls_back_sees_storage_the_invariants_allow() {
+    let Some(config) = config() else {
+        return;
+    };
+    // Paid only after the call: a payment made while the callee called
+    // back pushes it past the limit.
+    let late = prove("vault", "LateVault", "late_paid_within_limit", &config);
+    let Verdict::Refuted(refutation) = step(&late, "Pay") else {
+        panic!("{:?}", step(&late, "Pay"));
+    };
+    assert!(
+        matches!(&refutation.check, femp_vir::Check::Claim(text) if text.contains("fails after")),
+        "{:?}",
+        refutation.check
+    );
+    assert!(
+        step(&late, "Ready").is_proved(),
+        "a static call cannot call back"
+    );
+    // No sequence whose callees do not call back breaks it.
+    assert!(late.search.is_none());
+
+    // Past the limit at the call, which a callee calling back would see.
+    let eager = prove("vault", "EagerVault", "eager_paid_within_limit", &config);
+    let Verdict::Refuted(refutation) = step(&eager, "Pay") else {
+        panic!("{:?}", step(&eager, "Pay"));
+    };
+    assert_eq!(
+        refutation.check,
+        femp_vir::Check::Reentry("eager_paid_within_limit".to_string())
+    );
+    assert!(eager.search.is_none());
 }

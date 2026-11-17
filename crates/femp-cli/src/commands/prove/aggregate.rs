@@ -379,6 +379,10 @@ fn machine_status(
             let at = places.show(&refutation.span);
             format!("`{name}` panics ({kind}) at {at}")
         }
+        Check::Reentry(invariant) => format!(
+            "`{name}` calls another contract at {}, which can call back while `{invariant}` does not hold,",
+            places.show(&refutation.span)
+        ),
         other => other.to_string(),
     };
     let mut shown = refutation.shown.iter();
@@ -394,11 +398,26 @@ fn machine_status(
         from.push_str(&format!(", {}", arguments.join(", ")));
     }
     let mut reason = format!("{what} {from}");
+    let calls_out = plan
+        .contract
+        .as_ref()
+        .is_some_and(|side| side.calls_out.contains(name));
     if let Some(steps) = searched(plan) {
-        reason.push_str(&format!(
-            "\nno sequence of up to {steps} commands from `{}` breaks it, so the invariants are not inductive",
-            machine.init.name
-        ));
+        let init = &machine.init.name;
+        let reentered = matches!(refutation.check, Check::Reentry(_));
+        reason.push_str(&if reentered {
+            format!(
+                "\nthe search tries callees that do not call back, and no sequence of up to {steps} messages from `{init}` breaks it"
+            )
+        } else if calls_out {
+            format!(
+                "\n`{name}` calls another contract, which may call back first; the search tries callees that do not, and no sequence of up to {steps} messages from `{init}` breaks it"
+            )
+        } else {
+            format!(
+                "\nno sequence of up to {steps} commands from `{init}` breaks it, so the invariants are not inductive"
+            )
+        });
     }
     (Some(ClaimStatus::Unknown { reason }), None)
 }
@@ -475,11 +494,21 @@ fn message_status(plan: &ClaimPlan, places: &Places) -> (Option<ClaimStatus>, Op
         .filter(|done| matches!(done.role, Role::Reach(_)))
         .map(|done| done.index + 1)
         .max();
+    let calls_out = plan
+        .contract
+        .as_ref()
+        .is_some_and(|side| side.calls_out.contains(message));
     if let Some(steps) = searched {
-        reason.push_str(&format!(
-            "\nno sequence of up to {steps} messages from `{}` that ends in `{message}` reaches such a state; stronger invariants may prove it",
-            machine.init.name
-        ));
+        let init = &machine.init.name;
+        reason.push_str(&if calls_out {
+            format!(
+                "\n`{message}` calls another contract, which may call back first; the search tries callees that do not, and no sequence of up to {steps} messages from `{init}` that ends in `{message}` breaks it"
+            )
+        } else {
+            format!(
+                "\nno sequence of up to {steps} messages from `{init}` that ends in `{message}` reaches such a state; stronger invariants may prove it"
+            )
+        });
     }
     (Some(ClaimStatus::Unknown { reason }), None)
 }
@@ -506,6 +535,9 @@ pub fn failure(check: &Check, span: &Span, places: &Places) -> String {
         Check::Precondition(spec) => format!("the precondition of `{spec}` may not hold{at}"),
         Check::Unwind => format!(
             "the loop{at} may run more often than it was unrolled; give it an `invariant(..)` or raise `--unroll`"
+        ),
+        Check::Reentry(name) => format!(
+            "invariant `{name}` may not hold at the call{at} to another contract, which can call back"
         ),
     }
 }

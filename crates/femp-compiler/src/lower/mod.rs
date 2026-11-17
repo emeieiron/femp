@@ -55,6 +55,9 @@ impl Session {
             failed: HashMap::new(),
             names: BTreeSet::new(),
             states: HashMap::new(),
+            calls_out: false,
+            outside: BTreeSet::new(),
+            reentries: Vec::new(),
             ingot: self.ingot(),
         };
         let results = roots
@@ -144,6 +147,13 @@ pub(crate) struct Lowerer<'db> {
     names: BTreeSet<String>,
     /// Each contract's storage, as a tuple of its fields.
     states: HashMap<hir::hir_def::Contract<'db>, Type>,
+    /// Whether the body being lowered calls another contract.
+    calls_out: bool,
+    /// The functions whose own bodies call other contracts.
+    outside: BTreeSet<FuncId>,
+    /// For each storage type, the function a call that lets another
+    /// contract call back goes through.
+    reentries: Vec<(Type, FuncId)>,
     ingot: hir::Ingot<'db>,
 }
 
@@ -180,7 +190,7 @@ impl<'db> Lowerer<'db> {
             spans::of_owner(self.db, owner),
         ));
         self.functions.insert(instance, id);
-        match body::lower(self, instance, name, body::Role::Function) {
+        match self.lower_body(id, instance, name, body::Role::Function) {
             Ok(function) => {
                 *self.program.function_mut(id) = function;
                 Ok(id)
@@ -190,6 +200,54 @@ impl<'db> Lowerer<'db> {
                 Err(error)
             }
         }
+    }
+
+    /// Lowers a body, noting whether it calls other contracts.
+    fn lower_body(
+        &mut self,
+        id: FuncId,
+        instance: SemanticInstance<'db>,
+        name: String,
+        role: body::Role,
+    ) -> Result<Function, Unsupported> {
+        let outer = std::mem::take(&mut self.calls_out);
+        let lowered = body::lower(self, instance, name, role);
+        if std::mem::replace(&mut self.calls_out, outer) {
+            self.outside.insert(id);
+        }
+        lowered
+    }
+
+    /// The function storage of type `state` goes through where another
+    /// contract may call back. Its body passes the storage on unchanged,
+    /// which is what a callee that does not call back leaves.
+    pub(crate) fn reentry(&mut self, state: &Type, span: &Span) -> FuncId {
+        if let Some((_, func)) = self.reentries.iter().find(|(known, _)| known == state) {
+            return *func;
+        }
+        let mut name = "reenter".to_string();
+        let mut counter = 1;
+        while !self.names.insert(name.clone()) {
+            counter += 1;
+            name = format!("reenter#{counter}");
+        }
+        let mut function = Function::new(name, state.clone(), span.clone());
+        let storage = function.new_value(state.clone(), Some("storage".to_string()));
+        function.params.push(storage);
+        let block = function.entry;
+        function.block_mut(block).term = femp_vir::Terminator::Return(storage);
+        let func = self.program.push(function);
+        self.reentries.push((state.clone(), func));
+        func
+    }
+
+    /// The function a contract with storage `state` lets callees call back
+    /// through, if any of its code calls another contract that way.
+    pub(crate) fn reentry_of(&self, state: &Type) -> Option<FuncId> {
+        self.reentries
+            .iter()
+            .find(|(known, _)| known == state)
+            .map(|(_, func)| *func)
     }
 
     /// A contract's storage: a tuple of its fields in declaration order.

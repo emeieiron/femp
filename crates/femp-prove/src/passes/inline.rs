@@ -1,10 +1,14 @@
 //! Replaces every call in the task's entry with a copy of the callee's
 //! body, until no call is left. Recursion was rejected before, so this ends.
+//! A contract's call through which another contract may call back becomes
+//! what the task's reentry says instead.
 
-use femp_vir::{BlockId, Expr, Function, SlotId, StmtKind, Succ, Terminator, ValueId};
+use femp_vir::{
+    BlockId, Check, Expr, Function, SlotId, Stmt, StmtKind, Succ, Terminator, Type, ValueId,
+};
 
 use super::Pass;
-use crate::task::{NotSupported, Task};
+use crate::task::{NotSupported, Reentry, Task};
 
 pub struct Inline;
 
@@ -15,6 +19,10 @@ impl Pass for Inline {
 
     fn run(&self, task: &mut Task) -> Result<(), NotSupported> {
         while let Some((block, index, dst, func, args)) = first_call(task.entry()) {
+            if let Some(reentry) = task.reentry.clone().filter(|reentry| reentry.func == func) {
+                reenter(task.entry_mut(), block, index, dst, args[0], &reentry);
+                continue;
+            }
             let callee = task.program.function(func).clone();
             splice(task.entry_mut(), block, index, dst, &callee, &args);
         }
@@ -23,6 +31,67 @@ impl Pass for Inline {
 }
 
 type Call = (BlockId, usize, ValueId, femp_vir::FuncId, Vec<ValueId>);
+
+/// Replaces `dst = reenter(storage)`: the invariants checked of `storage`,
+/// then any storage that satisfies them. The invariants' calls are inlined
+/// in turn.
+fn reenter(
+    function: &mut Function,
+    block: BlockId,
+    index: usize,
+    dst: ValueId,
+    storage: ValueId,
+    reentry: &Reentry,
+) {
+    let span = function.block(block).stmts[index].span.clone();
+    let state: Type = function.ty(dst).clone();
+    let mut stmts = Vec::new();
+    let mut stmt = |kind| {
+        stmts.push(Stmt {
+            kind,
+            span: span.clone(),
+        })
+    };
+    for (func, name, args) in &reentry.checked {
+        let holds = function.new_value(Type::Bool, None);
+        let mut call_args = vec![storage];
+        call_args.extend(args);
+        stmt(StmtKind::Def {
+            dst: holds,
+            expr: Expr::Call {
+                func: *func,
+                args: call_args,
+            },
+        });
+        stmt(StmtKind::Assert {
+            cond: holds,
+            check: Check::Reentry(name.clone()),
+        });
+    }
+    let after = function.new_value(state, Some("reentered".to_string()));
+    stmt(StmtKind::Def {
+        dst: after,
+        expr: Expr::Havoc,
+    });
+    for (func, args) in &reentry.assumed {
+        let holds = function.new_value(Type::Bool, None);
+        let mut call_args = vec![after];
+        call_args.extend(args);
+        stmt(StmtKind::Def {
+            dst: holds,
+            expr: Expr::Call {
+                func: *func,
+                args: call_args,
+            },
+        });
+        stmt(StmtKind::Assume(holds));
+    }
+    stmt(StmtKind::Def {
+        dst,
+        expr: Expr::Use(after),
+    });
+    function.block_mut(block).stmts.splice(index..=index, stmts);
+}
 
 fn first_call(function: &Function) -> Option<Call> {
     for id in function.block_ids() {

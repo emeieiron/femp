@@ -19,7 +19,7 @@ use femp_vir::{
 };
 
 use super::inputs::{assume_domain, choose, vir_type};
-use crate::task::{Input, Task};
+use crate::task::{Input, Reentry, Task};
 
 /// The functions of a machine's methods in a lowered program.
 #[derive(Debug, Clone)]
@@ -30,6 +30,9 @@ pub struct MachineFns {
     pub observations: Vec<FuncId>,
     /// The initializer and commands revert rather than fail on a panic.
     pub reverts: bool,
+    /// The function a contract's storage goes through where it calls
+    /// another contract that may call back.
+    pub reenter: Option<FuncId>,
 }
 
 /// Parameters of a contract's handlers that never decrease from one
@@ -46,6 +49,7 @@ struct Builder<'a> {
     assumed: Vec<String>,
     /// The latest value of each monotonic parameter along a sequence.
     clock: Vec<(&'static str, ValueId)>,
+    reentry: Option<Reentry>,
 }
 
 impl<'a> Builder<'a> {
@@ -60,7 +64,33 @@ impl<'a> Builder<'a> {
             inputs: Vec::new(),
             assumed: Vec::new(),
             clock: Vec::new(),
+            reentry: None,
         }
+    }
+
+    /// Makes calls that let other contracts call back keep the invariants:
+    /// checked at the call at `checked` when given, and assumed of the
+    /// storage afterwards at `assumed`.
+    fn reenters(&mut self, checked: Option<&[Vec<ValueId>]>, assumed: Vec<(FuncId, Vec<ValueId>)>) {
+        let Some(func) = self.fns.reenter else {
+            return;
+        };
+        let checked = match checked {
+            Some(at) => self
+                .fns
+                .invariants
+                .iter()
+                .zip(&self.machine.invariants)
+                .zip(at)
+                .map(|((func, invariant), args)| (*func, invariant.name.clone(), args.clone()))
+                .collect(),
+            None => Vec::new(),
+        };
+        self.reentry = Some(Reentry {
+            func,
+            checked,
+            assumed,
+        });
     }
 
     fn result(&self, func: FuncId) -> Type {
@@ -244,6 +274,7 @@ impl<'a> Builder<'a> {
         Task {
             inputs: self.inputs,
             assumed: self.assumed,
+            reentry: self.reentry,
             ..Task::new(program, entry)
         }
     }
@@ -256,6 +287,8 @@ pub fn init_task(program: &Program, fns: &MachineFns, machine: &Machine) -> Resu
         machine,
         &format!("prove {}::init", machine.name),
     );
+    // A contract has no code while `init` runs, so no callee can call
+    // back into it.
     let block = builder.entry.entry;
     let (state, block) = builder.init(block)?;
     builder.check(block, state, &format!("`{}`", machine.init.name), None)?;
@@ -311,11 +344,13 @@ pub fn step_task(
         .cursor(first)
         .terminate(Terminator::Goto(Succ::to(hypothesis)));
     let mut holds = Vec::new();
+    let mut hypotheses = Vec::new();
     {
         let mut cursor = builder.cursor(hypothesis);
         for ((func, invariant), checked) in fns.invariants.iter().zip(&machine.invariants).zip(&at)
         {
             for instance in instances(invariant, checked, &method.params, &chosen) {
+                hypotheses.push((*func, instance.clone()));
                 let mut args = vec![state];
                 args.extend(instance);
                 holds.push(cursor.call(*func, args, Type::Bool));
@@ -323,6 +358,7 @@ pub fn step_task(
         }
         cursor.terminate(Terminator::Goto(Succ::to(body)));
     }
+    builder.reenters(Some(&at), hypotheses);
     {
         let mut cursor = Cursor::new(&mut builder.entry, body);
         for held in holds {
@@ -559,6 +595,7 @@ pub fn contract_machine(
     init: ContractHandler<'_>,
     arms: &[ContractHandler<'_>],
     invariants: &[(&str, &[Param], FuncId)],
+    reenter: Option<FuncId>,
 ) -> (Machine, MachineFns) {
     let method = |name: &str, params: &[Param]| Method {
         name: name.to_string(),
@@ -593,6 +630,7 @@ pub fn contract_machine(
         invariants: invariants.iter().map(|(_, _, func)| *func).collect(),
         observations: Vec::new(),
         reverts: true,
+        reenter,
     };
     (machine, fns)
 }
@@ -719,15 +757,18 @@ fn message_step(
         .terminate(Terminator::Goto(Succ::to(assumed)));
     if hypothesis {
         let mut holds = Vec::new();
+        let mut hypotheses = Vec::new();
         for (func, invariant) in fns.invariants.iter().zip(&machine.invariants) {
             let at = builder.every(assumed, invariant, false)?;
             let mut cursor = builder.cursor(assumed);
             for instance in instances(invariant, &at, &params, &values) {
+                hypotheses.push((*func, instance.clone()));
                 let mut args = vec![state];
                 args.extend(instance);
                 holds.push(cursor.call(*func, args, Type::Bool));
             }
         }
+        builder.reenters(None, hypotheses);
         let mut cursor = builder.cursor(assumed);
         for held in holds {
             cursor.assume(held);
