@@ -19,7 +19,7 @@ pub use outcome::{Outcome, PanicKind, Trap};
 pub use suite::{
     Command, Effect, Location, Machine, Method, Observation, Param, Property, PropertyKind, Suite,
 };
-pub use transactions::{Delivery, Transaction, Transactions};
+pub use transactions::{ContractRun, Delivery, Deployer, Transaction, Transactions};
 pub use ty::Ty;
 pub use value::Value;
 

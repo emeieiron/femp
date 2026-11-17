@@ -5,11 +5,10 @@
 //! only after its induction fails.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use femp_compiler::{
-    ContractRoot, LoweredContract, MessageRoot, Root, Session, Target, Unsupported,
-};
+use femp_compiler::{ContractRoot, Root, Session, Target, Unsupported};
 use femp_core::project::Module;
 use femp_core::property::{Machine, PropertyKind};
 use femp_prove::obligation::contract;
@@ -20,8 +19,10 @@ use femp_prove::obligation::property;
 use femp_prove::passes;
 use femp_prove::report::ClaimKind;
 use femp_prove::{Dumps, NotSupported, Summary, Task, Verdict};
-use femp_spec::{Claims, Contract, ContractMode, MessageKind, StorageClaim, TargetRef};
+use femp_spec::{Claims, Contract, ContractMode, MessageKind, TargetRef};
 use femp_vir::Program;
+
+use crate::contracts::{ContractSide, contract_machine, contract_root};
 
 /// The declaration a claim comes from, by its index in the module's claims.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +67,8 @@ pub struct ClaimPlan {
     pub selectors: Vec<Option<u32>>,
     /// A message claim's function, message and the values it ranges over.
     pub message: Option<MessageSide>,
+    /// What judging a contract's refutation on its storage needs.
+    pub contract: Option<ContractSide>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,8 @@ pub struct MessageSide {
     pub command: usize,
     pub params: Vec<femp_core::property::Param>,
     pub kind: MessageKind,
+    /// Whether the claim takes the storage after the message.
+    pub after: bool,
 }
 
 pub struct MachineSide {
@@ -153,6 +158,7 @@ fn skeleton(
         machine: None,
         selectors: Vec::new(),
         message: None,
+        contract: None,
     }
 }
 
@@ -227,59 +233,6 @@ pub fn skeletons(module: &Module, claims: &Claims) -> Vec<ClaimPlan> {
         }
     }
     plans
-}
-
-fn contract_root(claim: &StorageClaim) -> ContractRoot {
-    ContractRoot {
-        path: claim.path.clone(),
-        name: claim.name.clone(),
-        invariants: claim
-            .invariants
-            .iter()
-            .map(|invariant| Root::function(&invariant.path, &invariant.name))
-            .collect(),
-        messages: claim
-            .messages
-            .iter()
-            .map(|message| MessageRoot {
-                root: Root::function(&message.path, &message.name),
-                message: message.message.clone(),
-                after: message.kind == MessageKind::Ensures,
-            })
-            .collect(),
-    }
-}
-
-/// A lowered contract as the machine it is proved as.
-fn contract_machine(claim: &StorageClaim, contract: &LoweredContract) -> (Machine, MachineFns) {
-    fn handler(handler: &femp_compiler::Handler) -> machine::ContractHandler<'_> {
-        machine::ContractHandler {
-            name: &handler.name,
-            params: &handler.params,
-            func: handler.func,
-        }
-    }
-    let arms: Vec<machine::ContractHandler<'_>> = contract.arms.iter().map(handler).collect();
-    let invariants: Vec<(&str, &[femp_core::property::Param], femp_vir::FuncId)> = claim
-        .invariants
-        .iter()
-        .zip(&contract.invariants)
-        .map(|(invariant, lowered)| {
-            (
-                invariant.name.as_str(),
-                lowered.params.as_slice(),
-                lowered.func,
-            )
-        })
-        .collect();
-    machine::contract_machine(
-        &claim.name,
-        &claim.path,
-        claim.location.clone(),
-        handler(&contract.init),
-        &arms,
-        &invariants,
-    )
 }
 
 fn not_supported(error: &Unsupported) -> Verdict {
@@ -401,6 +354,7 @@ pub fn add_target(
     let contracts: Vec<ContractRoot> = claims.storage.iter().map(contract_root).collect();
     let lowered = loaded.lower_with(&wanted.roots, &contracts);
     let program = &lowered.program;
+    let mut program_arc = None;
     let available = summaries(claims, &wanted, &lowered.roots);
     let context = Context {
         label,
@@ -488,6 +442,12 @@ pub fn add_target(
                 });
                 plan.machine = Some(declared);
                 plan.selectors = contract.arms.iter().map(|arm| arm.selector).collect();
+                plan.contract = Some(ContractSide::new(
+                    &loaded,
+                    shared(&mut program_arc, program),
+                    &claims.storage[index],
+                    contract,
+                ));
             }
             Entry::Message(index, message_index) => {
                 let contract = match &lowered.contracts[index] {
@@ -512,6 +472,7 @@ pub fn add_target(
                     command: lowered_message.arm,
                     params: lowered_message.params.clone(),
                     kind,
+                    after: lowered_message.after,
                 };
                 for (role, check) in message_checks(kind) {
                     let built = machine::message_task(
@@ -532,10 +493,22 @@ pub fn add_target(
                 plan.machine = Some(declared);
                 plan.selectors = contract.arms.iter().map(|arm| arm.selector).collect();
                 plan.message = Some(side);
+                plan.contract = Some(ContractSide::new(
+                    &loaded,
+                    shared(&mut program_arc, program),
+                    claim,
+                    contract,
+                ));
             }
         }
     }
     Ok(())
+}
+
+/// One copy of the target's program for every contract that keeps it.
+fn shared(slot: &mut Option<Arc<Program>>, program: &Program) -> Arc<Program> {
+    slot.get_or_insert_with(|| Arc::new(program.clone()))
+        .clone()
 }
 
 /// What tasks for one target share while they are planned.

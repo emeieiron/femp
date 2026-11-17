@@ -295,3 +295,41 @@ pub fn doubled_spec(x: u64) -> u64 {
     assert!(report.contains("      x = 500\n"), "{report}");
     assert!(report.contains("not run on wasm"), "{report}");
 }
+
+fn token_project() -> Option<tempfile::TempDir> {
+    if !solver_available() {
+        return None;
+    }
+    Some(common::token_project())
+}
+
+#[test]
+fn contract_refutations_are_checked_on_the_deployed_storage() {
+    let Some(project) = token_project() else {
+        return;
+    };
+    let output = femp(project.path(), &["prove"]);
+    let report = stdout(&output);
+    assert!(!output.status.success(), "{report}");
+
+    let token = entry(&report, "contracts::Token");
+    assert!(token.starts_with("REFUTED"), "{token}");
+    assert!(
+        token.contains(
+            "evm accepts every transaction, and its storage then breaks `supply_stays_small`"
+        ),
+        "{token}"
+    );
+
+    let short = entry(&report, "contracts::transfer_reverts_when_short");
+    assert!(short.starts_with("REFUTED"), "{short}");
+    assert!(
+        short.contains(
+            "evm accepts every transaction, and the claim holds on its storage before step 1"
+        ),
+        "{short}"
+    );
+    assert!(!report.contains("disagree"), "{report}");
+    assert!(entry(&report, "contracts::transfer_moves_tokens").starts_with("PROVED"));
+    assert!(entry(&report, "contracts::mint_reverts").starts_with("PROVED"));
+}

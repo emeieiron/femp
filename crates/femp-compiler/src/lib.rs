@@ -28,6 +28,7 @@ pub use evm::{Contract, EvmBuild};
 pub use find::Root;
 pub use lower::{
     ContractRoot, Handler, Invariant, Lowered, LoweredContract, LoweredMessage, MessageRoot,
+    StorageLayout, Word,
 };
 pub use module::{load, test};
 pub use session::Session;

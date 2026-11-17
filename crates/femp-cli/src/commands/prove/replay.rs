@@ -7,11 +7,11 @@
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use femp_compiler::Word;
 use femp_core::platform::Platform;
 use femp_core::project::{BUILD_DIR, Module};
 use femp_core::property::{
-    Delivery, Executor, HarnessRequest, Machine, Method, Outcome, Sequence, Suite, Support, Trace,
-    Transaction, Transactions, Value,
+    Delivery, Executor, HarnessRequest, Outcome, Sequence, Suite, Support, Trace, Value,
 };
 use femp_prop::compare::Normalized;
 use femp_prop::describe::{describe, first_difference};
@@ -20,10 +20,12 @@ use femp_prop::report::{FailureKindName, TargetOutcome};
 use femp_prop::verdict::{judge_machine, judge_property};
 use femp_prove::report::{ClaimReport, ClaimStatus, Replay};
 use femp_spec::Claims;
+use femp_vir::eval::Val;
 
 use super::aggregate::ReplayCase;
-use super::plan::{ClaimPlan, Entry};
+use super::plan::{ClaimPlan, Entry, MessageSide};
 use crate::console;
+use crate::contracts::{ContractSide, Reads, transactions};
 use crate::session::BuildInputs;
 
 const REPLAY_DIR: &str = "replay";
@@ -223,11 +225,12 @@ impl Replayer<'_> {
         Ok(())
     }
 
-    /// Sends each sequence that breaks a contract's invariants to the
-    /// compiled contract. The proof found it among transactions that are
-    /// all accepted, so a rejected one means the model and the contract
-    /// disagree. The invariants read storage the EVM does not expose, so
-    /// the replay confirms the transactions, not the broken invariant.
+    /// Sends each sequence that breaks a contract's claim to the compiled
+    /// contract, then evaluates the claim on the storage the contract
+    /// holds. The proof found the sequence among transactions that go
+    /// through but, for a message that must revert, the last; a contract
+    /// that treats them otherwise, or whose storage satisfies the claim,
+    /// disagrees with the model.
     pub fn replay_contracts(&self, module: &Module, found: Vec<Found<'_>>) -> Result<()> {
         let cx = self.inputs.context(Default::default());
         let Some(platform) = self
@@ -247,21 +250,34 @@ impl Replayer<'_> {
             .join(&label)
             .join(&module.name);
         for item in found {
-            let (machine, sequence, last_goes_through) = match (&item.plan.machine, &item.case) {
-                (Some(machine), ReplayCase::Sequence(sequence)) => (machine, sequence, true),
-                (
-                    Some(machine),
-                    ReplayCase::Transactions {
-                        sequence,
-                        last_goes_through,
-                    },
-                ) => (machine, sequence, *last_goes_through),
-                _ => continue,
+            let (
+                Some(machine),
+                ReplayCase::Transactions {
+                    sequence,
+                    last_goes_through,
+                    extra,
+                    holds,
+                },
+            ) = (&item.plan.machine, &item.case)
+            else {
+                continue;
             };
-            let transactions = transactions(machine, &item.plan.selectors, sequence);
+            let last_goes_through = *last_goes_through;
+            let storage = item.plan.contract.as_ref().map(|side| {
+                let named = sequence
+                    .init
+                    .iter()
+                    .chain(sequence.steps.iter().flat_map(|step| &step.args))
+                    .chain(extra);
+                (side, side.reads(named))
+            });
+            let mut transactions = transactions(machine, &item.plan.selectors, sequence);
+            if let Some((_, reads)) = &storage {
+                transactions.reads = reads.slots.clone();
+            }
             console::step("Replaying", &format!("{} [{label}]", machine.name));
-            let deliveries = match platform.run_contract(&cx, module, &transactions, &out_dir) {
-                Ok(deliveries) => deliveries,
+            let run = match platform.run_contract(&cx, module, &transactions, &out_dir) {
+                Ok(run) => run,
                 Err(error) => {
                     let error = module.compiler_error(error);
                     item.report
@@ -270,8 +286,9 @@ impl Replayer<'_> {
                     continue;
                 }
             };
-            // Every transaction goes through but, when the claim says it must
-            // revert, the last.
+            let deliveries = &run.deliveries;
+            // Every transaction goes through but, when the model says it
+            // reverts, the last.
             let last = deliveries.len().saturating_sub(1);
             let unexpected = deliveries.iter().enumerate().find_map(|(index, delivery)| {
                 let goes_through = index < last || last_goes_through;
@@ -288,24 +305,48 @@ impl Replayer<'_> {
                 0 => "the deployment".to_string(),
                 step => format!("step {step} (`{}`)", transactions.calls[step - 1].name),
             };
-            let outcome = match &unexpected {
+            let mut outcome = match &unexpected {
                 None if last_goes_through => "accepts every transaction".to_string(),
                 None => match deliveries.last() {
                     Some(Delivery::Rejected(outcome)) => {
-                        format!("rejects {} as the claim says: {outcome}", name(last))
+                        format!("rejects {} as the model says: {outcome}", name(last))
                     }
-                    _ => format!("rejects {} as the claim says", name(last)),
+                    _ => format!("rejects {} as the model says", name(last)),
                 },
                 Some((step, Some(outcome))) => format!("rejects {}: {outcome}", name(*step)),
                 Some((step, None)) => {
                     format!("accepts {}, which the model says reverts", name(*step))
                 }
             };
+            let mut agrees = unexpected.is_none();
+            if agrees && let Some((side, reads)) = &storage {
+                let judged = judge(
+                    side,
+                    item.plan.message.as_ref(),
+                    sequence,
+                    extra,
+                    reads,
+                    &run.storage,
+                );
+                match judged {
+                    Ok(broken) if broken.is_none() == *holds => {
+                        outcome.push_str(&storage_agrees(broken, last));
+                    }
+                    Ok(_) => {
+                        outcome.push_str(", but its storage satisfies the claim");
+                        agrees = false;
+                    }
+                    Err(reason) => item
+                        .report
+                        .notes
+                        .push(format!("its storage on {label} is not checked: {reason}")),
+                }
+            }
             refuted.replay = vec![Replay {
                 target: label.clone(),
                 outcome,
             }];
-            if unexpected.is_some() {
+            if !agrees {
                 item.report.notes.push(
                     "the compiled targets do not reproduce this counterexample: the proof model and the compiled code disagree"
                         .to_string(),
@@ -324,38 +365,59 @@ impl Replayer<'_> {
     }
 }
 
-/// A contract's refuting sequence as transactions: each handler takes its
-/// context fields first, which the transaction runs in.
-fn transactions(machine: &Machine, selectors: &[Option<u32>], sequence: &Sequence) -> Transactions {
-    let transaction = |method: &Method, selector: Option<u32>, values: &[Value]| {
-        let mut transaction = Transaction {
-            selector,
-            name: method.name.clone(),
-            args: Vec::new(),
-            context: Vec::new(),
-        };
-        for (param, value) in method.params.iter().zip(values) {
-            if param.name.starts_with("ctx.") {
-                transaction.context.push((param.name.clone(), *value));
-            } else {
-                transaction.args.push(*value);
-            }
-        }
-        transaction
-    };
-    Transactions {
-        contract: machine.name.clone(),
-        deploy: transaction(&machine.init, None, &sequence.init),
-        calls: sequence
-            .steps
-            .iter()
-            .map(|step| {
-                transaction(
-                    &machine.commands[step.command].method,
-                    selectors.get(step.command).copied().flatten(),
-                    &step.args,
-                )
-            })
-            .collect(),
+/// What the replay adds once the contract's storage gives the claim what
+/// the model says: `broken` names the invariant the storage breaks.
+fn storage_agrees(broken: Option<Broken>, last: usize) -> String {
+    match broken {
+        Some(Broken::Invariant(name)) => format!(", and its storage then breaks `{name}`"),
+        Some(Broken::Message) => format!(", and its storage around step {last} breaks the claim"),
+        None => format!(", and the claim holds on its storage before step {last}"),
     }
+}
+
+/// What part of a claim the contract's storage breaks.
+enum Broken {
+    Invariant(String),
+    Message,
+}
+
+/// Evaluates the broken claim on the storage the contract holds after
+/// the sequence, or before and after its last message: each invariant, or
+/// the message claim. Gives what the storage breaks, if anything.
+fn judge(
+    side: &ContractSide,
+    message: Option<&MessageSide>,
+    sequence: &Sequence,
+    extra: &[Value],
+    reads: &Reads,
+    snapshots: &[Vec<Word>],
+) -> Result<Option<Broken>, String> {
+    let state = |index: usize| -> Result<Val, String> {
+        let words = snapshots
+            .get(index)
+            .ok_or_else(|| "the contract's storage was not read".to_string())?;
+        side.decode(reads, words)
+    };
+    let extra: Vec<Val> = extra.iter().map(Val::of).collect();
+    let last = sequence.steps.len();
+    let Some(message) = message else {
+        let broken = side
+            .broken(&state(last)?, &extra)
+            .map_err(|stop| stop.to_string())?;
+        return Ok(broken.map(|name| Broken::Invariant(name.to_string())));
+    };
+    let step = sequence
+        .steps
+        .last()
+        .ok_or_else(|| "the sequence sends no message".to_string())?;
+    let mut args = vec![state(last - 1)?];
+    if message.after {
+        args.push(state(last)?);
+    }
+    args.extend(step.args.iter().map(Val::of));
+    args.extend(extra);
+    let holds = side
+        .holds(message.func, args)
+        .map_err(|stop| stop.to_string())?;
+    Ok((!holds).then_some(Broken::Message))
 }

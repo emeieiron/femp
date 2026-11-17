@@ -6,7 +6,7 @@ use crate::environment::{Environment, OptLevel};
 use crate::error::{Error, Result};
 use crate::outcome::TestRun;
 use crate::project::{Module, Project};
-use crate::property::{Delivery, Executor, HarnessRequest, Transactions};
+use crate::property::{ContractRun, Deployer, Executor, HarnessRequest, Transactions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PlatformId(String);
@@ -105,20 +105,30 @@ pub trait Platform {
         })
     }
 
-    /// Builds the module, deploys its contract and sends it each call, and
-    /// returns what became of the deployment and of each call. Platforms
-    /// without contracts keep the default.
-    fn run_contract(
+    /// Builds the module's contracts, to deploy them and send them
+    /// transactions. Platforms without contracts keep the default.
+    fn deployer(
         &self,
         _cx: &Context<'_>,
         _module: &Module,
-        _transactions: &Transactions,
         _out_dir: &Path,
-    ) -> Result<Vec<Delivery>> {
+    ) -> Result<Box<dyn Deployer>> {
         Err(Error::Unavailable {
             platform: self.id().to_string(),
             reason: "this platform has no contracts".to_string(),
         })
+    }
+
+    /// Builds the module, deploys its contract and sends it each call, and
+    /// returns what became of the deployment and of each call.
+    fn run_contract(
+        &self,
+        cx: &Context<'_>,
+        module: &Module,
+        transactions: &Transactions,
+        out_dir: &Path,
+    ) -> Result<ContractRun> {
+        self.deployer(cx, module, out_dir)?.run(transactions)
     }
 }
 
