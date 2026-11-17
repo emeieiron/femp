@@ -233,6 +233,32 @@ output = "src/generated.fe"
 
 #[cfg(unix)]
 #[test]
+fn generator_diagnostics_name_paths_from_the_project_root() {
+    let Some(project) = project() else { return };
+    let root = project.path();
+    let manifest = root.join("femp.toml");
+    let mut config = fs::read_to_string(&manifest).unwrap();
+    config.push_str(
+        r#"
+[modules.core.generate.fixture]
+command = ["sh", "-c", "echo 'src/models.fe:3:5: error: unsupported field' >&2; echo 'no location' >&2; exit 1"]
+output = "src/generated.fe"
+"#,
+    );
+    fs::write(manifest, config).unwrap();
+
+    let output = femp(root, &["check", "-t", "evm"]);
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        errors.contains("shared/src/models.fe:3:5: error: unsupported field"),
+        "{errors}"
+    );
+    assert!(errors.contains("no location"), "{errors}");
+}
+
+#[cfg(unix)]
+#[test]
 fn generation_preserves_workspace_dependencies_and_skips_unselected_targets() {
     let Some(project) = project() else { return };
     let root = project.path();

@@ -91,7 +91,7 @@ pub fn stage(
         for (name, generator) in &project.manifest.modules[&module.name].generate {
             let editor = original.dir.join(&generator.output);
             let exists = validate_editor_output(&editor)?;
-            let source = generate(original, name, generator)?;
+            let source = generate(project, original, name, generator)?;
             write_file(&module.dir.join(&generator.output), &source)?;
             if exists {
                 refresh.push((editor, editor_copy(&source)));
@@ -312,12 +312,23 @@ fn relative_path(from: &Path, to: &Path) -> Result<String> {
     })
 }
 
-fn generate(original: &Module, name: &str, generator: &GeneratorSection) -> Result<String> {
-    run_generator(original, name, generator)
+fn generate(
+    project: &Project,
+    original: &Module,
+    name: &str,
+    generator: &GeneratorSection,
+) -> Result<String> {
+    run_generator(project, original, name, generator)
         .with_context(|| format!("generation failed for {}.{name}", original.name))
 }
 
-fn run_generator(original: &Module, name: &str, generator: &GeneratorSection) -> Result<String> {
+/// Runs a generator under the FSGP v1 contract (docs/source-generators.md).
+fn run_generator(
+    project: &Project,
+    original: &Module,
+    name: &str,
+    generator: &GeneratorSection,
+) -> Result<String> {
     let mut command = Command::new(executable(original, generator));
     command
         .args(&generator.command[1..])
@@ -328,7 +339,7 @@ fn run_generator(original: &Module, name: &str, generator: &GeneratorSection) ->
     let result = command
         .output()
         .with_context(|| format!("could not run {}", describe(&command)))?;
-    let diagnostics = String::from_utf8_lossy(&result.stderr);
+    let diagnostics = locate_diagnostics(&String::from_utf8_lossy(&result.stderr), &original.dir, &project.root);
     if !result.status.success() {
         bail!(
             "{} exited with {}\n{}",
@@ -343,13 +354,41 @@ fn run_generator(original: &Module, name: &str, generator: &GeneratorSection) ->
     String::from_utf8(result.stdout).context("generator output must be UTF-8 Fe source")
 }
 
+/// Rewrites diagnostics of the form `path:line:column: message`, whose paths a generator
+/// gives relative to its module, so each path resolves from the project root.
+fn locate_diagnostics(diagnostics: &str, module: &Path, root: &Path) -> String {
+    diagnostics
+        .lines()
+        .map(|line| locate_line(line, module, root).unwrap_or_else(|| line.to_string()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn locate_line(line: &str, module: &Path, root: &Path) -> Option<String> {
+    let (path, rest) = line.split_once(':')?;
+    let mut parts = rest.splitn(3, ':');
+    let (row, column, message) = (parts.next()?, parts.next()?, parts.next()?);
+    let number = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    if path.is_empty()
+        || path.trim() != path
+        || Path::new(path).is_absolute()
+        || !number(row)
+        || !number(column)
+        || !message.starts_with(' ')
+    {
+        return None;
+    }
+    let path = console::relative(&module.join(path), root);
+    Some(format!("{path}:{row}:{column}:{message}"))
+}
+
 pub fn editor_sources(project: &Project) -> Result<()> {
     let mut outputs = Vec::new();
     for module in &project.modules {
         for (name, generator) in &project.manifest.modules[&module.name].generate {
             let path = module.dir.join(&generator.output);
             validate_editor_output(&path)?;
-            outputs.push((path, editor_copy(&generate(module, name, generator)?)));
+            outputs.push((path, editor_copy(&generate(project, module, name, generator)?)));
         }
     }
     for (path, source) in outputs {
@@ -433,5 +472,29 @@ fn is_executable(path: &Path) -> bool {
     #[cfg(not(any(unix, windows)))]
     {
         path.is_file()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::locate_diagnostics;
+
+    #[test]
+    fn module_relative_diagnostics_resolve_from_the_project_root() {
+        let root = Path::new("/work/app");
+        let module = Path::new("/work/app/shared");
+        let text = "src/models.fe:3:5: error: unsupported field\n\
+                    note without a location\n\
+                    /abs/models.fe:1:1: error: absolute\n\
+                    src/a.fe:x:1: error: not a location";
+        assert_eq!(
+            locate_diagnostics(text, module, root),
+            "shared/src/models.fe:3:5: error: unsupported field\n\
+             note without a location\n\
+             /abs/models.fe:1:1: error: absolute\n\
+             src/a.fe:x:1: error: not a location"
+        );
     }
 }
