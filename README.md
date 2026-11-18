@@ -46,6 +46,7 @@ femp new my-app && cd my-app
 
 ```text
 shared/   the logic, its tests and specs
+spec/     the femp_spec library that #[spec] functions use
 evm/      a contract that exposes it
 native/   a command-line program
 wasm/     functions exported to JavaScript
@@ -84,6 +85,8 @@ femp prop
 
 ```text
 PASS  core::fee_never_exceeds_the_amount  256 cases on evm, native, wasm
+PASS  core::fee_spec                      256 cases on evm, native
+      not run on wasm: a WebAssembly module traps alike when a spec rejects a case and when it fails
 ```
 
 A failure is shrunk to a minimal counterexample, saved under `regressions/` and replayed on
@@ -108,7 +111,8 @@ femp prove
 ```
 
 ```text
-PROVED      core::fee_spec  on evm, native, wasm
+PROVED      core::fee_never_exceeds_the_amount  on evm, native, wasm
+PROVED      core::fee_spec                      on evm, native, wasm
 ```
 
 [Proving](docs/proving.md) · [Contracts](docs/contracts.md)
