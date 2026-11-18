@@ -28,6 +28,12 @@ pub trait Generator: Send + Sync + fmt::Debug {
 
     /// The choices that make `draw` produce its `rank`-th simplest value.
     fn choices_for(&self, rank: u64) -> Vec<U256>;
+
+    /// The choices that make `draw` produce `value`, when the generator
+    /// can tell.
+    fn choices_of(&self, _value: Value) -> Option<Vec<U256>> {
+        None
+    }
 }
 
 pub type Shared = Arc<dyn Generator>;

@@ -142,9 +142,9 @@ each message claim, runs as a machine of its own over the contract's messages:
   receives tokens is the one that later sends them.
 - Any other argument, and each step's advance of the clock, is drawn fresh half the time, and
   otherwise as a value of its type drawn earlier in the run, as it is or one above or below
-  it: a claim of exactly the total, a time that is exactly the end of a schedule. A fresh value
-  is the simplest, so shrinking turns a repeated value into a fresh one where the failure
-  allows.
+  it: a claim of exactly the total, a time that is exactly the end of a schedule. Shrinking
+  first draws each repeated value afresh as the same number, so that it shrinks on its own and
+  deleting an earlier step does not change it.
 
 ```
 FAIL  contracts::Token                        fails after 9 runs
@@ -273,7 +273,10 @@ generators, so a constrained value stays within its constraint.
 Shrinking does the following:
 
 - **Edits the tape.** It deletes machine steps, zeroes them, lowers choices by binary search,
-  moves magnitude from one choice to the next, and removes single choices.
+  moves magnitude from one choice to the next, and removes single choices. For machine runs it
+  also draws repeated values afresh, deletes a step while carrying its clock advance over to the
+  next one, so that a step that only lets time pass gives way, and lowers one value with every
+  value after it in proportion, so that amounts that add up past a total shrink together.
 - **Keeps only simpler tapes that still fail the same way.** A tape is simpler when it is
   shorter, or equally long and smaller choice by choice. A change is kept only if the case
   still fails in the same way (diverges or fails), so shrinking always ends.
@@ -283,7 +286,9 @@ The planted-bug fixture shows the results:
 
 - a divergence that starts at 1000 is reported as `x = 1000`;
 - a property that is false from 250 is reported as `x = 250`;
-- a machine bug that needs three large additions is reported as exactly those three steps.
+- a machine bug that needs three large additions is reported as exactly those three steps;
+- a vesting contract that forgets earlier claims is reported as two claims of a one-token
+  schedule, from every seed that finds it.
 
 ## Regressions
 

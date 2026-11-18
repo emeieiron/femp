@@ -17,10 +17,21 @@ pub struct Span {
     pub end: usize,
 }
 
+/// Choices that draw the same value as the run of choices they replace,
+/// such as a value drawn afresh in place of one that repeats an earlier
+/// value. Shrinking applies them to untie values from one another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rewrite {
+    pub start: usize,
+    pub end: usize,
+    pub choices: Vec<U256>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tape {
     pub choices: Vec<U256>,
     pub spans: Vec<Span>,
+    pub rewrites: Vec<Rewrite>,
 }
 
 impl Tape {
@@ -44,6 +55,7 @@ pub struct Choices {
     recorded: Vec<U256>,
     spans: Vec<Span>,
     open: Vec<(&'static str, usize)>,
+    rewrites: Vec<Rewrite>,
 }
 
 impl Choices {
@@ -65,6 +77,7 @@ impl Choices {
             recorded: Vec::new(),
             spans: Vec::new(),
             open: Vec::new(),
+            rewrites: Vec::new(),
         }
     }
 
@@ -107,10 +120,25 @@ impl Choices {
         }
     }
 
+    /// How many choices have been drawn so far.
+    pub fn position(&self) -> usize {
+        self.recorded.len()
+    }
+
+    /// Notes that `choices` draw what the choices since `start` drew.
+    pub fn rewrite(&mut self, start: usize, choices: Vec<U256>) {
+        self.rewrites.push(Rewrite {
+            start,
+            end: self.recorded.len(),
+            choices,
+        });
+    }
+
     pub fn into_tape(self) -> Tape {
         Tape {
             choices: self.recorded,
             spans: self.spans,
+            rewrites: self.rewrites,
         }
     }
 }

@@ -8,6 +8,12 @@ use crate::generators::{Registry, Shared};
 use femp_spec::domain::{self as spec, Spec};
 
 const STEP_SPAN: &str = "step";
+/// The span of one value a run draws, which shrinking can lower together
+/// with others.
+pub const VALUE_SPAN: &str = "value";
+/// The span of a step's clock advance, a value which shrinking can also
+/// carry over to the next step when it deletes the step.
+pub const CLOCK_SPAN: &str = "clock";
 
 #[derive(Debug)]
 pub struct ArgsGen {
@@ -141,14 +147,27 @@ impl Reuse {
 }
 
 /// Draws one value, which may repeat one of `pool`, the values drawn
-/// before it, and adds it to them.
+/// before it, and adds it to them. A repeated value notes how to draw it
+/// afresh, so that shrinking can untie it from the value it repeats.
 fn draw_value(
     generator: &Shared,
     reusable: bool,
     choices: &mut Choices,
     pool: &mut Vec<Value>,
 ) -> Value {
+    draw_value_as(VALUE_SPAN, generator, reusable, choices, pool)
+}
+
+fn draw_value_as(
+    label: &'static str,
+    generator: &Shared,
+    reusable: bool,
+    choices: &mut Choices,
+    pool: &mut Vec<Value>,
+) -> Value {
+    choices.start_span(label);
     let value = if reusable {
+        let start = choices.position();
         let how = Reuse::draw(choices);
         let ty = generator.ty();
         let earlier: Vec<Value> = pool
@@ -161,11 +180,18 @@ fn draw_value(
         } else {
             let index =
                 choices.draw_index(earlier.len(), |rng| rng.below_u64(earlier.len() as u64));
-            how.apply(earlier[index])
+            let value = how.apply(earlier[index]);
+            if let Some(fresh) = generator.choices_of(value) {
+                let mut drawn = vec![U256::ZERO];
+                drawn.extend(fresh);
+                choices.rewrite(start, drawn);
+            }
+            value
         }
     } else {
         generator.draw(choices)
     };
+    choices.end_span();
     pool.push(value);
     value
 }
@@ -247,7 +273,8 @@ impl SequenceGen {
                 .args
                 .draw_reusing(&generator.reusable, choices, &mut pool);
             let advance = self.clock.as_ref().map_or(0, |clock| {
-                draw_value(clock, self.clock_reusable, choices, &mut pool).to_u64_bits()
+                draw_value_as(CLOCK_SPAN, clock, self.clock_reusable, choices, &mut pool)
+                    .to_u64_bits()
             });
             choices.end_span();
             steps.push(Step {
@@ -389,6 +416,27 @@ mod tests {
         }
         assert!(same > 40, "{same} of 400 claims repeat the total");
         assert!(near > 20, "{near} of 400 claims are next to the total");
+    }
+
+    #[test]
+    fn repeated_values_note_how_to_draw_them_afresh() {
+        let generator = SequenceGen::for_machine(&Registry::standard(), &reusing()).unwrap();
+        let mut rewritten = 0;
+        for seed in 0..200 {
+            let mut choices = Choices::random(seed);
+            let sequence = generator.draw(&mut choices);
+            let tape = choices.into_tape();
+            let mut fresh = tape.choices.clone();
+            for rewrite in tape.rewrites.iter().rev() {
+                fresh.splice(rewrite.start..rewrite.end, rewrite.choices.iter().copied());
+                rewritten += 1;
+            }
+            // The same run, with nothing left that repeats a value.
+            let mut replay = Choices::replay(&fresh);
+            assert_eq!(generator.draw(&mut replay), sequence);
+            assert!(replay.into_tape().rewrites.is_empty());
+        }
+        assert!(rewritten > 40, "{rewritten} values repeated");
     }
 
     #[test]

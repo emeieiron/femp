@@ -134,7 +134,7 @@ FAIL  contracts::Vesting                 fails after 53 runs
       1. Claim(amount = 1)  (+1s)
       2. Claim(amount = 1)
       evm  invariant `claims_stay_within_total` fails after step 2
-      seed 0x0000000000000001, case 52, minimized in 534 runs
+      seed 0x0000000000000001, case 52, minimized in 494 runs
       saved to regressions/contracts/Vesting.json
       reproduce: femp prop -f Vesting --seed 0x0000000000000001
 ```

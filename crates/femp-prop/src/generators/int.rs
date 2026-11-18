@@ -125,6 +125,12 @@ impl Generator for IntRange {
     fn choices_for(&self, rank: u64) -> Vec<U256> {
         vec![U256::from(rank)]
     }
+
+    fn choices_of(&self, value: Value) -> Option<Vec<U256>> {
+        let ordinal = value.ordinal();
+        (value.ty() == self.ty && (self.lo..=self.hi).contains(&ordinal))
+            .then(|| vec![self.rank_of(ordinal)])
+    }
 }
 
 /// Ordinals of the values where integer code tends to break: zero and its
