@@ -56,7 +56,11 @@ REFUTED     core::Counter  invariant `few_big_adds` fails after step 3
 ```
 
 If it finds none, the machine is **unknown**, with the state the command breaks. Strengthen the
-invariants until they describe every state that can occur. The demonstrator's `VestingModel`
+invariants until they describe every state that can occur. The search looks among small values
+first, where the solver finds a sequence through wide arithmetic far faster, and then among all
+of them. When the solver cannot decide a length within `--timeout`, or the search spends its
+time budget, the reason says up to how many commands it ruled out and what it could
+not decide; a longer `--timeout` lets it search further. The demonstrator's `VestingModel`
 needed one that says the schedule stays valid, because `vested_at` cannot overflow on a valid
 schedule but can on an arbitrary one.
 

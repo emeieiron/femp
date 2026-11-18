@@ -110,6 +110,29 @@ fn solver() -> Option<PathBuf> {
 }
 
 #[test]
+fn a_search_out_of_time_names_the_first_length_it_did_not_try() {
+    let Some(solver) = solver() else {
+        return;
+    };
+    let config = Config {
+        solver,
+        timeout: Duration::from_secs(20),
+        search_budget: Duration::ZERO,
+        unroll: 8,
+    };
+    let task = task_named("width_is_bounded");
+    let tasks = vec![task.clone(), task.clone(), task];
+    // The first task is proved; the budget is spent before the second.
+    let (index, proof) = femp_prove::prove_first(&tasks, &config, &[]);
+    assert_eq!(index, 1);
+    assert!(
+        matches!(&proof.verdict, Verdict::Unknown(reason) if reason.contains("time budget")),
+        "{:?}",
+        proof.verdict
+    );
+}
+
+#[test]
 fn proves_and_refutes_the_fixture() {
     let Some(solver) = solver() else {
         return;

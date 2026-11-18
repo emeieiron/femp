@@ -402,21 +402,26 @@ fn machine_status(
         .contract
         .as_ref()
         .is_some_and(|side| side.calls_out.contains(name));
-    if let Some(steps) = searched(plan) {
+    if let Some(reach) = searched(plan, |role| role == Role::Search, places) {
         let init = &machine.init.name;
         let reentered = matches!(refutation.check, Check::Reentry(_));
+        let messages = format!("messages from `{init}`");
         reason.push_str(&if reentered {
             format!(
-                "\nthe search tries callees that do not call back, and no sequence of up to {steps} messages from `{init}` breaks it"
+                "\nthe search tries callees that do not call back, and {}",
+                reach.no_sequence(&messages, "breaks it")
             )
         } else if calls_out {
             format!(
-                "\n`{name}` calls another contract, which may call back first; the search tries callees that do not, and no sequence of up to {steps} messages from `{init}` breaks it"
+                "\n`{name}` calls another contract, which may call back first; the search tries callees that do not, and {}",
+                reach.no_sequence(&messages, "breaks it")
             )
         } else {
-            format!(
-                "\nno sequence of up to {steps} commands from `{init}` breaks it, so the invariants are not inductive"
-            )
+            let found = reach.no_sequence(&format!("commands from `{init}`"), "breaks it");
+            match reach.stopped {
+                None => format!("\n{found}, so the invariants are not inductive"),
+                Some(_) => format!("\n{found}"),
+            }
         });
     }
     (Some(ClaimStatus::Unknown { reason }), None)
@@ -490,35 +495,86 @@ fn message_status(plan: &ClaimPlan, places: &Places) -> (Option<ClaimStatus>, Op
         "{what}, from a state the invariants allow: {}",
         with.join(", ")
     );
-    let searched = done(plan)
-        .filter(|done| matches!(done.role, Role::Reach(_)))
-        .map(|done| done.index + 1)
-        .max();
     let calls_out = plan
         .contract
         .as_ref()
         .is_some_and(|side| side.calls_out.contains(message));
-    if let Some(steps) = searched {
+    if let Some(reach) = searched(plan, |role| matches!(role, Role::Reach(_)), places) {
         let init = &machine.init.name;
+        let sequences = format!("messages from `{init}` that ends in `{message}`");
         reason.push_str(&if calls_out {
             format!(
-                "\n`{message}` calls another contract, which may call back first; the search tries callees that do not, and no sequence of up to {steps} messages from `{init}` that ends in `{message}` breaks it"
+                "\n`{message}` calls another contract, which may call back first; the search tries callees that do not, and {}",
+                reach.no_sequence(&sequences, "breaks it")
             )
         } else {
-            format!(
-                "\nno sequence of up to {steps} messages from `{init}` that ends in `{message}` reaches such a state; stronger invariants may prove it"
-            )
+            let found = reach.no_sequence(&sequences, "reaches such a state");
+            match reach.stopped {
+                None => format!("\n{found}; stronger invariants may prove it"),
+                Some(_) => format!("\n{found}"),
+            }
         });
     }
     (Some(ClaimStatus::Unknown { reason }), None)
 }
 
-/// The number of steps the machine's searches covered, if they ran.
-fn searched(plan: &ClaimPlan) -> Option<usize> {
+/// How far a search over growing sequences got without finding one.
+struct Reach {
+    /// The longest sequences it decided, and every shorter one.
+    decided: usize,
+    /// Why it decided no longer ones, when it stopped short of its bound.
+    stopped: Option<String>,
+}
+
+impl Reach {
+    /// That no sequence of `sequences` does what `breaks` says, as far as
+    /// the search decided.
+    fn no_sequence(&self, sequences: &str, breaks: &str) -> String {
+        match (&self.stopped, self.decided) {
+            (None, steps) => format!("no sequence of up to {steps} {sequences} {breaks}"),
+            (Some(why), 0) => format!(
+                "the search could not decide whether a sequence of {sequences} {breaks}: {why}"
+            ),
+            (Some(why), steps) => format!(
+                "no sequence of up to {steps} {sequences} {breaks}, but the search could not decide longer ones: {why}"
+            ),
+        }
+    }
+
+    /// How far a search that found nothing got. Its task index is the
+    /// length it stopped at: the last when it decided every length,
+    /// otherwise the first it left undecided.
+    fn of(done: &Done) -> Self {
+        match &done.verdict {
+            Verdict::Unknown(reason) => Reach {
+                decided: done.index,
+                stopped: Some(format!(
+                    "{reason}; a longer `--timeout` lets it search further"
+                )),
+            },
+            Verdict::NotSupported(error) => Reach {
+                decided: 0,
+                stopped: Some(error.to_string()),
+            },
+            Verdict::Proved | Verdict::Refuted(_) => Reach {
+                decided: done.index + 1,
+                stopped: None,
+            },
+        }
+    }
+}
+
+/// How far the searches in `role` got, if they ran: as far as the one that
+/// got least far.
+fn searched(plan: &ClaimPlan, role: impl Fn(Role) -> bool, places: &Places) -> Option<Reach> {
     done(plan)
-        .filter(|done| done.role == Role::Search)
-        .map(|done| done.index + 1)
-        .max()
+        .filter(|done| role(done.role))
+        .map(Reach::of)
+        .min_by_key(|reach| (reach.decided, reach.stopped.is_none()))
+        .map(|reach| Reach {
+            stopped: reach.stopped.map(|why| places.relativize(&why)),
+            ..reach
+        })
 }
 
 pub fn failure(check: &Check, span: &Span, places: &Places) -> String {
@@ -539,5 +595,68 @@ pub fn failure(check: &Check, span: &Span, places: &Places) -> String {
         Check::Reentry(name) => format!(
             "invariant `{name}` may not hold at the call{at} to another contract, which can call back"
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn search(index: usize, verdict: Verdict) -> Done {
+        Done {
+            role: Role::Search,
+            targets: vec!["evm".to_string()],
+            index,
+            verdict,
+            relies_on: Vec::new(),
+        }
+    }
+
+    const COMMANDS: &str = "commands from `init`";
+
+    #[test]
+    fn a_search_that_decided_every_length_says_how_long() {
+        let reach = Reach::of(&search(5, Verdict::Proved));
+        assert_eq!(
+            reach.no_sequence(COMMANDS, "breaks it"),
+            "no sequence of up to 6 commands from `init` breaks it"
+        );
+        assert!(reach.stopped.is_none());
+    }
+
+    #[test]
+    fn a_search_the_solver_could_not_finish_says_where_it_stopped() {
+        // The two-step search timed out: only single commands are decided.
+        let timed_out = "the solver could not decide `invariant` (timed out)";
+        let reach = Reach::of(&search(1, Verdict::Unknown(timed_out.to_string())));
+        assert_eq!(
+            reach.no_sequence(COMMANDS, "breaks it"),
+            "no sequence of up to 1 commands from `init` breaks it, but the search could not \
+             decide longer ones: the solver could not decide `invariant` (timed out); a longer \
+             `--timeout` lets it search further"
+        );
+        let first = Reach::of(&search(0, Verdict::Unknown(timed_out.to_string())));
+        assert!(
+            first
+                .no_sequence(COMMANDS, "breaks it")
+                .starts_with("the search could not decide whether a sequence of commands"),
+            "{}",
+            first.no_sequence(COMMANDS, "breaks it")
+        );
+    }
+
+    #[test]
+    fn a_search_out_of_time_counts_only_what_it_finished() {
+        // Five of six lengths decided before the budget ran out.
+        let reach = Reach::of(&search(
+            5,
+            Verdict::Unknown("the search spent its time budget".to_string()),
+        ));
+        assert_eq!(reach.decided, 5);
+        assert!(
+            reach
+                .no_sequence(COMMANDS, "breaks it")
+                .starts_with("no sequence of up to 5 commands from `init` breaks it, but"),
+        );
     }
 }

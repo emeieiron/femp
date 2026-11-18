@@ -25,6 +25,10 @@ pub struct Task {
     /// What a contract's call to another contract that may call back
     /// means; without it, the callee leaves the storage alone.
     pub reentry: Option<Reentry>,
+    /// The task searches for an execution that breaks a claim, as a
+    /// machine's bounded search does, rather than proving that none does,
+    /// so the solver looks among small inputs first.
+    pub search: bool,
 }
 
 /// A contract's call to another contract that may call back into it. The
@@ -65,6 +69,7 @@ impl Task {
             proving: None,
             relies_on: Vec::new(),
             reentry: None,
+            search: false,
         }
     }
 

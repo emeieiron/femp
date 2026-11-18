@@ -37,12 +37,20 @@ struct Proof {
 }
 
 fn prove(fixture_name: &str, name: &str, invariant: &str, config: &Config) -> Proof {
+    prove_all(fixture_name, name, &[invariant], config)
+}
+
+/// Proves the contract's `invariants` together, as `femp prove` does.
+fn prove_all(fixture_name: &str, name: &str, invariants: &[&str], config: &Config) -> Proof {
     let dir = fixture(fixture_name);
     let session = Session::open(&dir, Target::Evm).unwrap_or_else(|error| panic!("{error}"));
     let root = ContractRoot {
         path: Vec::new(),
         name: name.to_string(),
-        invariants: vec![Root::function(&[], invariant)],
+        invariants: invariants
+            .iter()
+            .map(|invariant| Root::function(&[], invariant))
+            .collect(),
         messages: Vec::new(),
     };
     let lowered = session.lower_with(&[], &[root]);
@@ -61,17 +69,18 @@ fn prove(fixture_name: &str, name: &str, invariant: &str, config: &Config) -> Pr
         file: dir.join("src/lib.fe"),
         line: 1,
     };
+    let lowered_invariants: Vec<_> = invariants
+        .iter()
+        .zip(&contract.invariants)
+        .map(|(invariant, lowered)| (*invariant, lowered.params.as_slice(), lowered.func))
+        .collect();
     let (declared, fns) = machine::contract_machine(
         name,
         &[],
         location,
         handler(&contract.init),
         &arms,
-        &[(
-            invariant,
-            &contract.invariants[0].params,
-            contract.invariants[0].func,
-        )],
+        &lowered_invariants,
         contract.reenter,
     );
     let program = &lowered.program;
@@ -178,6 +187,43 @@ fn refutes_a_bound_the_owner_can_mint_past() {
         .position(|param| param.name == "ctx.caller")
         .unwrap();
     assert_eq!(step.args[caller], sequence.init[0]);
+}
+
+#[test]
+fn finds_a_sequence_of_two_claims_where_wide_values_stall_the_solver() {
+    let Some(config) = config() else {
+        return;
+    };
+    // `Claim` forgets earlier claims, so claiming everything twice breaks
+    // the invariant. Among every `u64` the solver needs well over the
+    // timeout to find those two steps through the vesting arithmetic;
+    // among small values it finds them at once.
+    let proof = prove_all(
+        "schedule",
+        "Schedule",
+        &["claims_stay_within_total", "schedule_stays_valid"],
+        &config,
+    );
+    assert!(proof.init.is_proved(), "{:?}", proof.init);
+    let (steps, verdict, declared) = proof.search.expect("a sequence from deployment");
+    let Verdict::Refuted(refutation) = verdict else {
+        unreachable!()
+    };
+    assert_eq!(steps, 2);
+    let sequence = machine::decode(&declared, steps, &refutation.values).unwrap();
+    let shown = |values: &[femp_core::property::Value]| -> Vec<String> {
+        values.iter().map(ToString::to_string).collect()
+    };
+    // init(total = 1, start = 0, cliff = 0, duration = 1), then twice
+    // Claim(ctx.timestamp = 1, amount = 1): the minimum `femp prop` finds.
+    assert_eq!(shown(&sequence.init), ["1", "0", "0", "1"]);
+    for step in &sequence.steps {
+        let claim = &declared.commands[step.command].method;
+        assert_eq!(claim.name, "Claim");
+        let names: Vec<&str> = claim.params.iter().map(|param| param.name.as_str()).collect();
+        assert_eq!(names, ["ctx.timestamp", "amount"]);
+        assert_eq!(shown(&step.args), ["1", "1"]);
+    }
 }
 
 /// Proves one message claim of the token fixture: each of its checks from

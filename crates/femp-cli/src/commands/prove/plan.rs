@@ -113,8 +113,9 @@ impl ClaimPlan {
 pub struct Done {
     pub role: Role,
     pub targets: Vec<String>,
-    /// Which of the job's tasks decided, such as the number of steps a
-    /// search took, less one.
+    /// Which of the job's tasks decided: the refuted one, the last when
+    /// every one is proved, otherwise the first left undecided. For a
+    /// search, the number of steps it took, less one.
     pub index: usize,
     pub verdict: Verdict,
     /// The specs whose summaries the proof used.

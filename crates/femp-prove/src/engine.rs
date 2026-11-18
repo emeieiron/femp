@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use femp_core::property::Value;
+use femp_core::property::{Ty, U256, Value};
+use femp_spec::Domain;
 
 use crate::passes::{self, Pass};
 use crate::solver::minimize::{self, Input};
@@ -15,6 +16,12 @@ use crate::vc::{self, Script};
 use crate::verdict::{Refutation, Verdict};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How far from its simplest value an input drawn from its whole type may
+/// lie in the executions a search tries first, nearest first. Wide values
+/// are what make the solver's nonlinear arithmetic slow, and a small
+/// execution is the one minimization moves toward anyway.
+const SMALL_INPUTS: [u64; 3] = [1, 0xff, 0xffff];
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -55,8 +62,10 @@ pub fn prove(mut task: Task, config: &Config, dumps: &Dumps) -> Proof {
 }
 
 /// Proves tasks in order until one is refuted, as a search over growing
-/// bounds does, and says which one decided. A sequence stops early once it
-/// has spent the search budget, as undecided at the last task it finished.
+/// bounds does, and says which one decided: the refuted task, the last one
+/// when every task is proved, and otherwise the first one left undecided.
+/// A sequence stops early once it has spent the search budget, undecided
+/// at the first task it did not start unless an earlier one was.
 pub fn prove_first(tasks: &[Task], config: &Config, dumps: &[Dumps]) -> (usize, Proof) {
     let started = std::time::Instant::now();
     let mut unknown: Option<(usize, String)> = None;
@@ -69,11 +78,9 @@ pub fn prove_first(tasks: &[Task], config: &Config, dumps: &[Dumps]) -> (usize, 
     };
     for (index, task) in tasks.iter().enumerate() {
         if index > 0 && started.elapsed() > config.search_budget {
-            let reason = format!("the search stopped after {index} steps, its time budget spent");
-            return (
-                index - 1,
-                finish(Verdict::Unknown(reason), relies_on, assumed),
-            );
+            let (index, reason) = unknown
+                .unwrap_or_else(|| (index, "the search spent its time budget".to_string()));
+            return (index, finish(Verdict::Unknown(reason), relies_on, assumed));
         }
         let dumps = dumps.get(index).cloned().unwrap_or_default();
         let proof = prove(task.clone(), config, &dumps);
@@ -165,6 +172,11 @@ pub fn solve(
                 continue;
             }
         }
+        if task.search
+            && let Some(refutation) = small_counterexample(solver, task, script, obligation, timeout)?
+        {
+            return Ok(Verdict::Refuted(refutation));
+        }
         solver.reset()?;
         solver.send(&script.prelude)?;
         solver.assert(&obligation.violation)?;
@@ -194,13 +206,49 @@ pub fn solve(
     })
 }
 
-fn counterexample(
+/// Looks for an execution that breaks `obligation` among ever larger
+/// small inputs, each within a quarter of the timeout, and minimizes it
+/// within those bounds. A search's queries over wide integers can take the
+/// solver far longer than over small ones, where an execution often is;
+/// finding none there leaves the query to the full check.
+fn small_counterexample(
     solver: &mut dyn Solver,
     task: &Task,
+    script: &Script,
+    obligation: &vc::Obligation,
     timeout: Duration,
-) -> Result<Refutation, String> {
-    let primitives: Vec<Input<'_>> = task
-        .inputs
+) -> Result<Option<Refutation>, String> {
+    let wide: Vec<Input<'_>> = primitives(task)
+        .into_iter()
+        .filter(|input| {
+            input.ty != Ty::Bool && matches!(input.domain, Domain::Any(_) | Domain::Custom { .. })
+        })
+        .collect();
+    for distance in SMALL_INPUTS.map(U256::from) {
+        if !wide.iter().any(|input| minimize::narrows(input, distance)) {
+            break;
+        }
+        solver.reset()?;
+        solver.send(&script.prelude)?;
+        solver.assert(&obligation.violation)?;
+        for input in &wide {
+            solver.assert(&minimize::within(input, distance))?;
+        }
+        if solver.check(timeout / 4)? == Answer::Sat {
+            let refutation = counterexample(solver, task, timeout)?;
+            return Ok(Some(Refutation {
+                check: obligation.check.clone(),
+                span: obligation.span.clone(),
+                ..refutation
+            }));
+        }
+    }
+    Ok(None)
+}
+
+/// The task's inputs of primitive type, as minimization moves them.
+fn primitives(task: &Task) -> Vec<Input<'_>> {
+    task.inputs
         .iter()
         .filter_map(|input| {
             let (ty, domain) = input.domain.as_ref()?;
@@ -210,7 +258,15 @@ fn counterexample(
                 domain,
             })
         })
-        .collect();
+        .collect()
+}
+
+fn counterexample(
+    solver: &mut dyn Solver,
+    task: &Task,
+    timeout: Duration,
+) -> Result<Refutation, String> {
+    let primitives = primitives(task);
     solver.push()?;
     let values: Vec<Value> = minimize::minimize(solver, &primitives, timeout)?;
     let terms: Vec<String> = task

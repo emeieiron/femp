@@ -376,3 +376,28 @@ fn callees_that_may_call_back_are_part_of_the_proof() {
         "{reverts}"
     );
 }
+
+#[test]
+fn a_sequence_through_wide_arithmetic_is_found_and_replayed() {
+    if !solver_available() {
+        return;
+    }
+    // A claim that forgets earlier claims: two claims of everything pay
+    // out twice the total, past the vesting arithmetic on 256-bit values.
+    let project = common::contract_project("schedule");
+    let output = femp(project.path(), &["prove"]);
+    let report = stdout(&output);
+    assert!(!output.status.success(), "{report}");
+    let schedule = entry(&report, "contracts::Schedule");
+    assert!(schedule.starts_with("REFUTED"), "{schedule}");
+    for line in [
+        "invariant `claims_stay_within_total` fails after step 2\n",
+        "init(total = 1, start = 0, cliff = 0, duration = 1)\n",
+        "1. Claim(ctx.timestamp = 1, amount = 1)\n",
+        "2. Claim(ctx.timestamp = 1, amount = 1)\n",
+        "evm accepts every transaction, and its storage then breaks `claims_stay_within_total`",
+    ] {
+        assert!(schedule.contains(line), "{schedule}");
+    }
+}
+

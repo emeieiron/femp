@@ -390,7 +390,10 @@ pub fn search_task(
         &format!("search {} in {steps} steps", machine.name),
     );
     let (_, block) = sequence(&mut builder, steps, true)?;
-    Ok(builder.finish(block))
+    Ok(Task {
+        search: true,
+        ..builder.finish(block)
+    })
 }
 
 /// `steps` commands from `#[init]`, each checked against the invariants;
@@ -711,7 +714,10 @@ pub fn message_search_task(
         .cursor(block)
         .terminate(Terminator::Goto(Succ::to(last)));
     let block = message_step(&mut builder, last, state, claim, check, false)?;
-    Ok(builder.finish(block))
+    Ok(Task {
+        search: true,
+        ..builder.finish(block)
+    })
 }
 
 /// Sends the message from `state` and checks the claim; with `hypothesis`,

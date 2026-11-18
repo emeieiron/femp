@@ -164,7 +164,9 @@ one WebAssembly call that reads the sequence from a host file.
 6. **Solver** (`solver`): one `z3 -in -smt2` process per task, a fresh context per assertion
    (a context reused across queries is weaker on nonlinear arithmetic), a fixed seed and a
    per-query timeout. A satisfiable query's inputs are minimized by bisection on their distance
-   from the simplest value, in property testing's order.
+   from the simplest value, in property testing's order. A machine's search for a sequence
+   (`Task::search`) first asks for one among small inputs, which the solver decides quickly
+   where wide nonlinear arithmetic makes the full query slow.
 7. **Replay and report** (`femp-cli`): counterexamples run on the property harnesses, are judged
    as `femp prop` judges them, and are saved as regressions. The report renders as text or JSON.
 

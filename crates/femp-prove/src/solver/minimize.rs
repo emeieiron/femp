@@ -49,7 +49,7 @@ pub fn minimize(
                 let options = [Value::boolean(false), Value::boolean(true)];
                 first_possible(solver, input, &options, probe)?.unwrap_or(current)
             }
-            domain => nearest_to_origin(solver, input, domain, current, probe)?,
+            _ => nearest_to_origin(solver, input, current, probe)?,
         };
         solver.assert(&format!("(= {} {})", input.term, ints::value(&value)))?;
         chosen.push(value);
@@ -92,33 +92,48 @@ fn first_possible(
     Ok(None)
 }
 
+/// An input's simplest value: zero, or the domain's bound nearest to it.
+fn origin(input: &Input<'_>) -> U256 {
+    let (lo, hi) = input.domain.hull(input.ty);
+    input.ty.zero_ordinal().clamp(lo, hi)
+}
+
+/// That `input` lies within `distance` of its simplest value.
+pub fn within(input: &Input<'_>, distance: U256) -> String {
+    let ty = input.ty;
+    let origin = origin(input);
+    let low = Value::from_ordinal(ty, origin.saturating_sub(distance));
+    let high = Value::from_ordinal(ty, origin.saturating_add(distance).min(ty.max_ordinal()));
+    format!(
+        "(and (<= {} {}) (<= {} {}))",
+        ints::value(&low),
+        input.term,
+        input.term,
+        ints::value(&high)
+    )
+}
+
+/// Whether `within(input, distance)` leaves out some of its domain.
+pub fn narrows(input: &Input<'_>, distance: U256) -> bool {
+    let (lo, hi) = input.domain.hull(input.ty);
+    let origin = origin(input);
+    origin.saturating_sub(distance) > lo || origin.saturating_add(distance) < hi
+}
+
 fn nearest_to_origin(
     solver: &mut dyn Solver,
     input: &Input<'_>,
-    domain: &Domain,
     current: Value,
     timeout: Duration,
 ) -> Result<Value, String> {
     let ty = input.ty;
-    let (lo, hi) = domain.hull(ty);
-    let origin = ty.zero_ordinal().clamp(lo, hi);
+    let origin = origin(input);
     let ordinal = current.ordinal();
     let max = ty.max_ordinal();
-    let within = |distance: U256| {
-        let low = Value::from_ordinal(ty, origin.saturating_sub(distance));
-        let high = Value::from_ordinal(ty, origin.saturating_add(distance).min(max));
-        format!(
-            "(and (<= {} {}) (<= {} {}))",
-            ints::value(&low),
-            input.term,
-            input.term,
-            ints::value(&high)
-        )
-    };
     let (mut low, mut high) = (U256::ZERO, ordinal.abs_diff(origin));
     while low < high {
         let middle = low + (high - low) / U256::from(2u8);
-        if possible(solver, &within(middle), timeout)? {
+        if possible(solver, &within(input, middle), timeout)? {
             high = middle;
         } else {
             low = middle + U256::from(1u8);

@@ -1,0 +1,122 @@
+use core::marker::Copy
+use std::evm::{Ctx, Log, revert_error}
+
+msg ScheduleMsg {
+    #[selector = sol("vestedAt(uint64)")]
+    VestedAt { timestamp: u64 } -> u64,
+    #[selector = sol("claimableAt(uint64)")]
+    ClaimableAt { timestamp: u64 } -> u64,
+    #[selector = sol("claimable()")]
+    Claimable -> u64,
+    #[selector = sol("claimed()")]
+    Claimed -> u64,
+    #[selector = sol("claim(uint64)")]
+    Claim { amount: u64 } -> u64,
+}
+
+#[event]
+pub struct TokensClaimed { pub amount: u64 }
+
+#[error]
+pub struct Refused { pub amount: u64 }
+
+pub struct ScheduleStore {
+    pub total: u64,
+    pub start: u64,
+    pub cliff: u64,
+    pub duration: u64,
+    pub claimed: u64,
+}
+
+pub struct Terms { pub total: u64, pub start: u64, pub cliff: u64, pub duration: u64 }
+
+impl Copy for Terms {}
+
+fn now() -> u64 uses (ctx: Ctx) {
+    ctx.timestamp().as_seconds().downcast_truncate()
+}
+
+fn terms() -> Terms uses (store: ScheduleStore) {
+    Terms { total: store.total, start: store.start, cliff: store.cliff, duration: store.duration }
+}
+
+/// Nothing before the cliff, all of the total from the end, and a share of
+/// it in between, which takes a product and a quotient of 256-bit values.
+fn vested_at(_ terms: Terms, _ now: u64) -> u64 {
+    if now < terms.start + terms.cliff {
+        return 0
+    }
+    let elapsed = now - terms.start
+    if elapsed >= terms.duration {
+        return terms.total
+    }
+    let vested = (terms.total as u256) * (elapsed as u256) / (terms.duration as u256)
+    vested.downcast_unchecked()
+}
+
+fn claimable_at(_ terms: Terms, _ claimed: u64, _ now: u64) -> u64 {
+    let vested = vested_at(terms, now)
+    if vested > claimed {
+        vested - claimed
+    } else {
+        0
+    }
+}
+
+/// A vesting contract whose `Claim` checks the amount against what has
+/// vested, but forgets what was claimed before: two claims of everything
+/// pay out twice the total.
+pub contract Schedule uses (ctx: Ctx, log: mut Log) {
+    mut store: ScheduleStore,
+
+    init(total: u64, start: u64, cliff: u64, duration: u64) uses (mut store) {
+        if total == 0 || duration == 0 || cliff > duration
+            || (start as u256) + (duration as u256) > (u64::max() as u256) {
+            revert_error(Refused { amount: total })
+        }
+        store.total = total
+        store.start = start
+        store.cliff = cliff
+        store.duration = duration
+    }
+
+    recv ScheduleMsg {
+        VestedAt { timestamp } -> u64 uses (store) {
+            vested_at(terms(), timestamp)
+        }
+
+        ClaimableAt { timestamp } -> u64 uses (store) {
+            claimable_at(terms(), store.claimed, timestamp)
+        }
+
+        Claimable -> u64 uses (store, ctx) {
+            claimable_at(terms(), store.claimed, now())
+        }
+
+        Claimed -> u64 uses (store) {
+            store.claimed
+        }
+
+        Claim { amount } -> u64 uses (mut store, ctx, mut log) {
+            if amount == 0 || amount > vested_at(terms(), now()) {
+                revert_error(Refused { amount })
+            }
+            store.claimed = store.claimed + amount
+            log.emit(TokensClaimed { amount })
+            store.claimed
+        }
+    }
+}
+
+#[invariant]
+fn claims_stay_within_total(store: ScheduleStore) -> bool {
+    store.claimed <= store.total
+}
+
+#[invariant]
+fn schedule_stays_valid(store: ScheduleStore) -> bool {
+    store.total > 0
+        && store.duration > 0
+        && store.cliff <= store.duration
+        && (store.start as u256) + (store.duration as u256) <= (u64::max() as u256)
+}
