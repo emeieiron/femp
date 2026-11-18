@@ -1,0 +1,41 @@
+---
+import Base from '../layouts/Base.astro';
+import { url } from '../lib/site';
+---
+
+<Base title="Not found · FeMP" description="This page does not exist.">
+  <section class="container lost">
+    <p class="eyebrow">Error · no target</p>
+    <h1>Nothing builds here.</h1>
+    <p>The address doesn't match any page. The documentation starts with an overview of FeMP.</p>
+    <div class="actions">
+      <a class="button button-primary" href={url('docs/overview/')}>Read the docs</a>
+      <a class="button" href={url()}>Home</a>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .lost {
+    padding: clamp(72px, 14vw, 160px) 0 40px;
+  }
+
+  h1 {
+    margin-top: 18px;
+    font-size: clamp(2.6rem, 7vw, 4.8rem);
+    font-stretch: 80%;
+  }
+
+  p:not(.eyebrow) {
+    margin-top: 20px;
+    max-width: 52ch;
+    color: var(--fg-muted);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 32px;
+  }
+</style>

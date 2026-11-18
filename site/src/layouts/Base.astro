@@ -1,0 +1,51 @@
+---
+import '@fontsource-variable/bricolage-grotesque/wdth.css';
+import '@fontsource-variable/instrument-sans/wdth.css';
+import '@fontsource-variable/jetbrains-mono';
+import '../styles/global.css';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import { url } from '../lib/site';
+
+interface Props {
+  title: string;
+  description: string;
+  current?: 'home' | 'docs';
+}
+
+const { title, description, current } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href={url('favicon.svg')} type="image/svg+xml" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta name="theme-color" content="#0c0b0a" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4f0e8" media="(prefers-color-scheme: light)" />
+    <script is:inline>
+      // Apply a saved theme before the first paint; without one, the system theme applies.
+      try {
+        const theme = localStorage.getItem('theme');
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <Header current={current} />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

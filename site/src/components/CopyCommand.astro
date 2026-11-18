@@ -1,0 +1,97 @@
+---
+interface Props {
+  command: string;
+  label?: string;
+}
+
+const { command, label = 'Copy command' } = Astro.props;
+---
+
+<div class="command" data-copy-root>
+  <span class="prompt" aria-hidden="true">$</span>
+  <code>{command}</code>
+  <button type="button" data-copy={command} aria-label={label}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+    <span class="done" aria-live="polite"></span>
+  </button>
+</div>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+    button.addEventListener('click', async () => {
+      const status = button.querySelector('.done');
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy ?? '');
+        if (status) status.textContent = 'Copied';
+      } catch {
+        if (status) status.textContent = 'Select and copy';
+      }
+      window.setTimeout(() => {
+        if (status) status.textContent = '';
+      }, 1600);
+    });
+  }
+</script>
+
+<style>
+  .command {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 6px 6px 6px 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--bg-raised);
+    font-size: 0.84rem;
+  }
+
+  .prompt {
+    font-family: var(--font-mono);
+    color: var(--accent);
+  }
+
+  code {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    color: var(--fg);
+    scrollbar-width: none;
+  }
+
+  button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+
+  button:hover {
+    color: var(--fg);
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+  }
+
+  .done {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    font: 500 0.7rem/1 var(--font-mono);
+    color: var(--byte);
+    white-space: nowrap;
+  }
+</style>

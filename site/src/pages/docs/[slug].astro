@@ -1,0 +1,41 @@
+---
+import { getCollection, render } from 'astro:content';
+import Docs from '../../layouts/Docs.astro';
+import { pages } from '../../lib/site';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('docs');
+  const listed = new Set(pages.map((page) => page.slug));
+  for (const entry of entries) {
+    if (!listed.has(entry.id)) {
+      throw new Error(`docs/${entry.id}.md is not in the sidebar; add it to site/src/lib/site.ts`);
+    }
+  }
+  for (const page of pages) {
+    if (!entries.some((entry) => entry.id === page.slug)) {
+      throw new Error(`the sidebar lists '${page.slug}', but docs/${page.slug}.md does not exist`);
+    }
+  }
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+const label = pages.find((page) => page.slug === entry.id)?.label ?? entry.id;
+const title = headings.find((heading) => heading.depth === 1)?.text ?? label;
+
+// The first paragraph, as plain text, describes the page.
+const paragraph = (entry.body ?? '')
+  .split(/\n{2,}/)
+  .map((block) => block.trim())
+  .find((block) => block && !/^(#|```|\||-|\d+\.)/.test(block));
+const description = (paragraph ?? title)
+  .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+  .replace(/[`*_]/g, '')
+  .replace(/\s+/g, ' ')
+  .slice(0, 200);
+---
+
+<Docs slug={entry.id} title={title} description={description} headings={headings}>
+  <Content />
+</Docs>

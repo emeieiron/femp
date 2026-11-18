@@ -1,7 +1,7 @@
 # Source generators (FSGP v1)
 
 The Fe Source Generator Protocol is the contract between a build tool that compiles Fe and
-a program that writes Fe source for it. FeMP is one such build tool; `fe-codec-gen` is one
+a program that writes Fe source for it. FeMP is one such build tool; `fe_codec_gen` is one
 such generator. Neither needs to know anything about the other beyond this page. The
 output is ordinary Fe source, so the generated module also compiles with the plain `fe`
 toolchain once it is written to disk.
@@ -14,7 +14,7 @@ information to a generator, and needs none back.
 
 ```toml
 [modules.shared.generate.serializers]
-command = ["fe-codec-gen", "--source", "src/models.fe", "--stdout"]
+command = ["fe_codec_gen", "--source", "src/models.fe", "--stdout"]
 output = "src/serializers.fe"
 ```
 
@@ -48,7 +48,7 @@ A conforming generator:
   bytes. Output contains no timestamps, absolute paths, random identifiers or
   environment-dependent values.
 - **writes no files.** Its only output is standard output and standard error. (A generator
-  can offer a separate mode that writes files for use without a host, as `fe-codec-gen
+  can offer a separate mode that writes files for use without a host, as `fe_codec_gen
   --out` does; that mode is outside the protocol.)
 - **reports failure by its exit status.** A non-zero status means nothing it printed may be
   used. A generator never prints partial source and exits 0.

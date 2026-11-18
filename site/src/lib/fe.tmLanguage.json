@@ -1,0 +1,84 @@
+{
+  "name": "fe",
+  "displayName": "Fe",
+  "scopeName": "source.fe",
+  "aliases": ["Fe"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#attributes" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#macros" },
+    { "include": "#calls" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.documentation.fe", "match": "///.*$" },
+        { "name": "comment.line.double-slash.fe", "match": "//.*$" }
+      ]
+    },
+    "attributes": {
+      "name": "entity.other.attribute-name.fe",
+      "begin": "#!?\\[",
+      "end": "\\]",
+      "patterns": [{ "include": "#strings" }, { "include": "#numbers" }]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.fe",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.fe", "match": "\\\\." }]
+        },
+        { "name": "string.quoted.single.fe", "match": "b'(?:[^'\\\\]|\\\\.)*'" }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.fe",
+      "match": "\\b(?:0x[0-9a-fA-F]+|0o[0-7]+|0b[01]+|[0-9][0-9_]*)\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.fe",
+          "match": "\\b(?:if|else|match|for|in|while|loop|return|break|continue)\\b"
+        },
+        {
+          "name": "storage.type.fe",
+          "match": "\\b(?:fn|struct|enum|trait|impl|type|const|contract|msg|recv|init|mod|use|extern|static_assert)\\b"
+        },
+        {
+          "name": "storage.modifier.fe",
+          "match": "\\b(?:pub|let|var|mut|ref|own|uses|with|where|as|unsafe|ingot|super|self|Self)\\b"
+        },
+        { "name": "constant.language.fe", "match": "\\b(?:true|false)\\b" }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.fe",
+          "match": "\\b(?:bool|u8|u16|u32|u64|u128|u256|i8|i16|i32|i64|i128|i256|usize|isize)\\b"
+        },
+        { "name": "entity.name.type.fe", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }
+      ]
+    },
+    "macros": {
+      "name": "entity.name.function.macro.fe",
+      "match": "\\b[a-z_][a-z0-9_]*!"
+    },
+    "calls": {
+      "name": "meta.function-call.fe",
+      "match": "\\b[a-z_][a-z0-9_]*(?=\\s*(?:<[^()]*>)?\\()"
+    },
+    "punctuation": {
+      "name": "punctuation.separator.fe",
+      "match": "::|->|=>|[{}()\\[\\],;:.<>]"
+    }
+  }
+}

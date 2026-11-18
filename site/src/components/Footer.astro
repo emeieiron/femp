@@ -1,0 +1,98 @@
+---
+import Logo from './Logo.astro';
+import { nav, repo, url } from '../lib/site';
+---
+
+<footer class="footer">
+  <div class="container inner">
+    <div class="brand">
+      <Logo />
+      <p>One Fe codebase for EVM contracts, native programs and WebAssembly, tested and proved to agree.</p>
+    </div>
+    {
+      nav.map((group) => (
+        <div class="column">
+          <p class="heading">{group.label}</p>
+          <ul>
+            {group.items.map((item) => (
+              <li>
+                <a href={url(`docs/${item.slug}/`)}>{item.label}</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+    <div class="column">
+      <p class="heading">Source</p>
+      <ul>
+        <li><a href={repo}>GitHub</a></li>
+        <li><a href={`${repo}/tree/main/examples/vesting`}>Vesting example</a></li>
+        <li><a href={`${repo}/releases`}>Releases</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    margin-top: 120px;
+    border-top: 1px solid var(--line);
+    padding: 56px 0 72px;
+  }
+
+  .inner {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(5, 1fr);
+    gap: 32px;
+  }
+
+  .brand p {
+    margin-top: 16px;
+    max-width: 30ch;
+    color: var(--fg-muted);
+    font-size: 0.92rem;
+  }
+
+  .heading {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  ul {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  a {
+    color: var(--fg-muted);
+    font-size: 0.92rem;
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--fg);
+  }
+
+  @media (max-width: 960px) {
+    .inner {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .brand {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .inner {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

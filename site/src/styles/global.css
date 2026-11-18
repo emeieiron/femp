@@ -1,0 +1,453 @@
+/* FeMP: a datasheet for targets. Every color is a token defined once with light-dark(), so
+ * the page follows the system theme until the toggle sets data-theme on <html>. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: light-dark(#f4f0e8, #0c0b0a);
+  --bg-raised: light-dark(#ebe5da, #141211);
+  --bg-elevated: light-dark(#e2dacd, #1c1916);
+  --bg-glass: light-dark(rgb(244 240 232 / 0.82), rgb(12 11 10 / 0.78));
+  --line: light-dark(#d5ccbd, #29241f);
+  --line-strong: light-dark(#bcb09d, #3e3730);
+  --fg: light-dark(#1c1915, #eee8df);
+  --fg-muted: light-dark(#564f46, #a9a196);
+  --fg-faint: light-dark(#6c645a, #817a70);
+  --accent: light-dark(#b23c0a, #ff7a3d);
+  --accent-strong: light-dark(#8f2f06, #ff9b6a);
+  --accent-soft: light-dark(rgb(178 60 10 / 0.1), rgb(255 122 61 / 0.12));
+  --on-accent: light-dark(#fff8f2, #160b05);
+  --byte: light-dark(#0b6b5e, #6fdcc5);
+  --grid: light-dark(rgb(28 25 21 / 0.07), rgb(238 232 223 / 0.05));
+  --shadow-color: light-dark(rgb(70 45 20 / 0.32), rgb(0 0 0 / 0.85));
+
+  /* One hue per field in the byte inspector. */
+  --f1: light-dark(#b23c0a, #ff7a3d);
+  --f2: light-dark(#0b6b5e, #6fdcc5);
+  --f3: light-dark(#8a5a00, #f2c46d);
+  --f4: light-dark(#5a3fc0, #b8a2ff);
+  --f5: light-dark(#ad2357, #ff86b0);
+
+  /* Shiki's css-variables theme. */
+  --astro-code-foreground: var(--fg);
+  --astro-code-background: var(--bg-raised);
+  --astro-code-token-keyword: light-dark(#b23c0a, #ff8d5c);
+  --astro-code-token-function: light-dark(#0b6b5e, #7fd8c4);
+  --astro-code-token-constant: light-dark(#8a5a00, #f2c46d);
+  --astro-code-token-string: light-dark(#4b7319, #c2d98d);
+  --astro-code-token-string-expression: light-dark(#4b7319, #c2d98d);
+  --astro-code-token-comment: light-dark(#7d7568, #7a736a);
+  --astro-code-token-punctuation: light-dark(#6c645a, #9a9287);
+  --astro-code-token-parameter: var(--fg);
+  --astro-code-token-link: var(--accent);
+
+  --font-display: 'Bricolage Grotesque Variable', 'Avenir Next Condensed', sans-serif;
+  --font-body: 'Instrument Sans Variable', 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', monospace;
+
+  --radius: 6px;
+  --header-height: 60px;
+  --max: 1200px;
+  --gutter: clamp(16px, 4vw, 40px);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--header-height) + 24px);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* Paper grain, kept faint enough to read over. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.45 0 0 0 0 0.4 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+a {
+  color: inherit;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-stretch: 88%;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  margin: 0;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.container {
+  width: min(100% - 2 * var(--gutter), var(--max));
+  margin-inline: auto;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  z-index: 100;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--radius);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.skip-link:focus {
+  left: 12px;
+}
+
+/* ---- Shared pieces ------------------------------------------------------------------- */
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.eyebrow::before {
+  content: '';
+  width: 22px;
+  height: 1px;
+  background: currentColor;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--fg);
+  font: 600 0.95rem/1 var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.button:hover {
+  border-color: var(--fg-muted);
+  background: var(--bg-raised);
+}
+
+.button:active {
+  transform: translateY(1px);
+}
+
+.button-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.button-primary:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.kbd-chip {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* ---- Code ---------------------------------------------------------------------------- */
+
+pre.astro-code {
+  margin: 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised) !important;
+  font-size: 0.84rem;
+  line-height: 1.65;
+  tab-size: 4;
+}
+
+pre.astro-code code {
+  font-family: var(--font-mono);
+}
+
+/* ---- Prose: the Markdown in docs/ ------------------------------------------------------ */
+
+.prose {
+  font-size: 1.02rem;
+  line-height: 1.72;
+  color: var(--fg-muted);
+}
+
+.prose > * + * {
+  margin-top: 1.1em;
+}
+
+.prose h1 {
+  font-size: clamp(2.3rem, 4.6vw, 3.4rem);
+  color: var(--fg);
+  margin-bottom: 0.6em;
+}
+
+.prose h2 {
+  margin-top: 2.6em;
+  padding-top: 1.1em;
+  border-top: 1px solid var(--line);
+  font-size: 1.75rem;
+  color: var(--fg);
+}
+
+.prose h3 {
+  margin-top: 2em;
+  font-size: 1.28rem;
+  color: var(--fg);
+}
+
+.prose h2 + *,
+.prose h3 + * {
+  margin-top: 0.75em;
+}
+
+.prose strong {
+  color: var(--fg);
+  font-weight: 650;
+}
+
+.prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.prose a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.3em;
+}
+
+.prose li + li {
+  margin-top: 0.4em;
+}
+
+.prose li::marker {
+  color: var(--fg-faint);
+}
+
+.prose :not(pre) > code {
+  font-size: 0.86em;
+  padding: 0.1em 0.25em;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.prose pre.astro-code {
+  margin-top: 1.4em;
+  margin-bottom: 1.4em;
+}
+
+.prose table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.prose th,
+.prose td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose th {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  border-bottom-color: var(--line-strong);
+  white-space: nowrap;
+}
+
+.prose td code {
+  white-space: nowrap;
+}
+
+.prose blockquote {
+  margin-inline: 0;
+  padding: 2px 0 2px 18px;
+  border-left: 2px solid var(--accent);
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Heading anchors added by the docs page script. */
+.prose .anchor {
+  margin-left: 0.35em;
+  color: var(--fg-faint);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.prose :is(h2, h3):hover .anchor,
+.prose .anchor:focus-visible {
+  opacity: 1;
+}
+
+.copy-code {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font: 500 0.7rem/1.4 var(--font-mono);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.code-wrap {
+  position: relative;
+}
+
+.code-wrap:hover .copy-code,
+.copy-code:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .copy-code {
+    opacity: 1;
+  }
+}
+
+/* ---- Motion -------------------------------------------------------------------------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

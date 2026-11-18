@@ -1,0 +1,78 @@
+<button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch theme">
+  <svg class="sun" viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="4.2"></circle>
+    <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"></path>
+  </svg>
+  <svg class="moon" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M20 14.6A8.4 8.4 0 0 1 9.4 4a8.4 8.4 0 1 0 10.6 10.6Z"></path>
+  </svg>
+</button>
+
+<script>
+  const dark = window.matchMedia('(prefers-color-scheme: dark)');
+  const current = () =>
+    document.documentElement.dataset.theme ?? (dark.matches ? 'dark' : 'light');
+
+  function label(button: HTMLButtonElement) {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', `Switch to the ${next} theme`);
+    button.dataset.current = current();
+  }
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]')) {
+    label(button);
+    button.addEventListener('click', () => {
+      const next = current() === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      try {
+        localStorage.setItem('theme', next);
+      } catch {
+        // Storage may be unavailable; the choice then lasts for this page only.
+      }
+      label(button);
+    });
+    dark.addEventListener('change', () => label(button));
+  }
+</script>
+
+<style>
+  .theme-toggle {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--fg-muted);
+    cursor: pointer;
+    transition:
+      color 140ms ease,
+      border-color 140ms ease;
+  }
+
+  .theme-toggle:hover {
+    color: var(--fg);
+    border-color: var(--line-strong);
+  }
+
+  svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Show the theme you would switch to. */
+  .theme-toggle[data-current='dark'] .moon,
+  .theme-toggle[data-current='light'] .sun {
+    display: none;
+  }
+
+  .theme-toggle:not([data-current]) .sun {
+    display: none;
+  }
+</style>
