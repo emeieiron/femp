@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    rect { fill: #1a110b; stroke: #ff7a3d; }
+    text { fill: #f4efe8; }
+    .n { fill: #ff7a3d; }
+    @media (prefers-color-scheme: light) {
+      rect { fill: #fbe9dc; stroke: #b23c0a; }
+      text { fill: #1c1915; }
+      .n { fill: #b23c0a; }
+    }
+  </style>
+  <rect x="3" y="3" width="58" height="58" rx="8" stroke-width="4"/>
+  <text class="n" x="11" y="20" font-family="ui-monospace, monospace" font-size="12" font-weight="700">26</text>
+  <text x="32" y="50" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="30" font-weight="800" letter-spacing="-1">Fe</text>
+</svg>

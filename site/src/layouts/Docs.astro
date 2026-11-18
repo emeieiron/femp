@@ -1,0 +1,436 @@
+---
+import Base from './Base.astro';
+import { nav, pages, repo, url } from '../lib/site';
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  slug: string;
+  title: string;
+  description: string;
+  headings: Heading[];
+}
+
+const { slug, title, description, headings } = Astro.props;
+const index = pages.findIndex((page) => page.slug === slug);
+const previous = index > 0 ? pages[index - 1] : undefined;
+const next = index < pages.length - 1 ? pages[index + 1] : undefined;
+const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+const group = nav.find((g) => g.items.some((item) => item.slug === slug));
+---
+
+<Base title={`${title} · FeMP`} description={description} current="docs">
+  <div class="docs">
+    <details class="mobile-nav">
+      <summary>
+        <span class="menu-label">Menu</span>
+        <span class="crumb">{group?.label} / {pages[index]?.label}</span>
+      </summary>
+      <nav aria-label="Documentation">
+        {
+          nav.map((g) => (
+            <div class="group">
+              <p>{g.label}</p>
+              <ul>
+                {g.items.map((item) => (
+                  <li>
+                    <a href={url(`docs/${item.slug}/`)} aria-current={item.slug === slug ? 'page' : undefined}>
+                      {item.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </details>
+
+    <aside class="sidebar">
+      <nav aria-label="Documentation">
+        {
+          nav.map((g, gi) => (
+            <div class="group">
+              <p>
+                <span class="num">{String(gi + 1).padStart(2, '0')}</span>
+                {g.label}
+              </p>
+              <ul>
+                {g.items.map((item) => (
+                  <li>
+                    <a href={url(`docs/${item.slug}/`)} aria-current={item.slug === slug ? 'page' : undefined}>
+                      {item.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </aside>
+
+    <article class="article">
+      <div class="prose" data-prose>
+        <slot />
+      </div>
+
+      <footer class="article-foot">
+        <a class="edit" href={`${repo}/edit/main/docs/${slug}.md`}>Edit this page on GitHub</a>
+        <nav class="pager" aria-label="Pages">
+          {
+            previous ? (
+              <a class="prev" href={url(`docs/${previous.slug}/`)}>
+                <span>Previous</span>
+                {previous.label}
+              </a>
+            ) : (
+              <span />
+            )
+          }
+          {
+            next && (
+              <a class="next" href={url(`docs/${next.slug}/`)}>
+                <span>Next</span>
+                {next.label}
+              </a>
+            )
+          }
+        </nav>
+      </footer>
+    </article>
+
+    <aside class="toc" aria-label="On this page">
+      {
+        toc.length > 0 && (
+          <>
+            <p>On this page</p>
+            <ul>
+              {toc.map((heading) => (
+                <li class={`depth-${heading.depth}`}>
+                  <a href={`#${heading.slug}`} data-toc={heading.slug}>
+                    {heading.text}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </>
+        )
+      }
+    </aside>
+  </div>
+</Base>
+
+<script>
+  const prose = document.querySelector<HTMLElement>('[data-prose]');
+  if (prose) {
+    // Anchors on section headings.
+    for (const heading of prose.querySelectorAll<HTMLElement>('h2[id], h3[id]')) {
+      const anchor = document.createElement('a');
+      anchor.className = 'anchor';
+      anchor.href = `#${heading.id}`;
+      anchor.textContent = '#';
+      anchor.setAttribute('aria-label', `Link to “${heading.textContent}”`);
+      heading.append(anchor);
+    }
+
+    // Copy buttons on code blocks.
+    for (const pre of prose.querySelectorAll<HTMLPreElement>('pre.astro-code')) {
+      const wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
+      pre.replaceWith(wrap);
+      wrap.append(pre);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'copy-code';
+      button.textContent = 'Copy';
+      button.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(pre.innerText.replace(/\n$/, ''));
+          button.textContent = 'Copied';
+        } catch {
+          button.textContent = 'Select to copy';
+        }
+        window.setTimeout(() => (button.textContent = 'Copy'), 1600);
+      });
+      wrap.append(button);
+    }
+
+    // Mark the section being read in the table of contents: the last heading scrolled past,
+    // or the last one once the page is scrolled to the end.
+    const links = new Map(
+      [...document.querySelectorAll<HTMLAnchorElement>('[data-toc]')].map((a) => [a.dataset.toc!, a]),
+    );
+    const targets = [...links.keys()]
+      .map((id) => document.getElementById(id))
+      .filter((target): target is HTMLElement => target !== null);
+    const update = () => {
+      let current = targets[0]?.id;
+      for (const target of targets) {
+        if (target.getBoundingClientRect().top <= 140) current = target.id;
+      }
+      const end = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      if (end && targets.length > 0) current = targets[targets.length - 1].id;
+      for (const [id, link] of links) link.classList.toggle('active', id === current);
+    };
+    let queued = false;
+    window.addEventListener(
+      'scroll',
+      () => {
+        if (queued) return;
+        queued = true;
+        window.requestAnimationFrame(() => {
+          queued = false;
+          update();
+        });
+      },
+      { passive: true },
+    );
+    update();
+  }
+</script>
+
+<style>
+  .docs {
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr) 220px;
+    gap: clamp(28px, 4vw, 64px);
+    width: min(100% - 2 * var(--gutter), 1440px);
+    margin-inline: auto;
+    padding-top: 40px;
+  }
+
+  .sidebar,
+  .toc {
+    position: sticky;
+    top: calc(var(--header-height) + 32px);
+    align-self: start;
+    max-height: calc(100vh - var(--header-height) - 56px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .group + .group {
+    margin-top: 28px;
+  }
+
+  .group p {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font: 600 0.7rem/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .num {
+    color: var(--accent);
+  }
+
+  .group ul,
+  .toc ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .group a {
+    display: block;
+    padding: 7px 12px;
+    margin-left: -12px;
+    border-left: 2px solid transparent;
+    color: var(--fg-muted);
+    font-size: 0.93rem;
+    text-decoration: none;
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+
+  .group a:hover {
+    color: var(--fg);
+  }
+
+  .group a[aria-current='page'] {
+    border-left-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  .article {
+    min-width: 0;
+    max-width: 76ch;
+    padding-bottom: 40px;
+  }
+
+  .article-foot {
+    margin-top: 72px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .edit {
+    font-size: 0.86rem;
+    color: var(--fg-faint);
+  }
+
+  .edit:hover {
+    color: var(--accent);
+  }
+
+  .pager {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 24px;
+  }
+
+  .pager a {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--fg);
+    font-weight: 600;
+    text-decoration: none;
+    transition: border-color 140ms ease;
+  }
+
+  .pager a:hover {
+    border-color: var(--accent);
+  }
+
+  .pager span {
+    font: 500 0.7rem/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .pager .next {
+    text-align: right;
+    grid-column: 2;
+  }
+
+  .toc p {
+    margin-bottom: 12px;
+    font: 600 0.7rem/1 var(--font-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .toc a {
+    display: block;
+    padding: 5px 0 5px 12px;
+    border-left: 1px solid var(--line);
+    color: var(--fg-faint);
+    font-size: 0.84rem;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+
+  .toc .depth-3 a {
+    padding-left: 24px;
+  }
+
+  .toc a:hover {
+    color: var(--fg);
+  }
+
+  .toc a.active {
+    border-left-color: var(--accent);
+    color: var(--fg);
+  }
+
+  .mobile-nav {
+    display: none;
+  }
+
+  @media (max-width: 1180px) {
+    .docs {
+      grid-template-columns: 220px minmax(0, 1fr);
+    }
+
+    .toc {
+      display: none;
+    }
+  }
+
+  @media (max-width: 840px) {
+    .docs {
+      grid-template-columns: minmax(0, 1fr);
+      padding-top: 0;
+    }
+
+    .sidebar {
+      display: none;
+    }
+
+    .mobile-nav {
+      display: block;
+      position: sticky;
+      top: var(--header-height);
+      z-index: 20;
+      margin-inline: calc(-1 * var(--gutter));
+      padding: 0 var(--gutter);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .mobile-nav summary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+      cursor: pointer;
+      list-style: none;
+      font-size: 0.9rem;
+    }
+
+    .mobile-nav summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .menu-label {
+      padding: 4px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      font: 600 0.72rem/1.2 var(--font-mono);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .crumb {
+      color: var(--fg-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .mobile-nav nav {
+      padding: 8px 0 20px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .mobile-nav .group a {
+      margin-left: 0;
+    }
+
+    .article {
+      padding-top: 28px;
+    }
+  }
+</style>

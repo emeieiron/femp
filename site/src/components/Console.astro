@@ -1,0 +1,219 @@
+---
+// A terminal with one tab per command, showing what each printed on a real project.
+interface Tab {
+  id: string;
+  label: string;
+  output: string;
+}
+
+interface Props {
+  title: string;
+  tabs: Tab[];
+}
+
+const { title, tabs } = Astro.props;
+
+const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Colors the words a reader scans for: verdicts, step names and the prompt.
+function paint(output: string): string {
+  return output
+    .split('\n')
+    .map((line) => {
+      const html = escape(line);
+      if (html.startsWith('$ ')) return `<span class="prompt">$</span> <span class="cmd">${html.slice(2)}</span>`;
+      return html
+        .replace(/^(\s*)(Tested|Built|Parity)\b/, '$1<span class="step">$2</span>')
+        .replace(/^(PASS|PROVED)\b/, '<span class="ok">$1</span>')
+        .replace(/^(FAIL|REFUTED)\b/, '<span class="bad">$1</span>')
+        .replace(/\b(pass)\b/g, '<span class="ok">$1</span>')
+        .replace(/^(\s+)(bytecode|runtime-bytecode|abi|metadata|binding|executable|wasm-module|wasm-manifest|runtime|package-manifest)\b/, '$1<span class="kind">$2</span>');
+    })
+    .join('\n');
+}
+---
+
+<figure class="console" data-console>
+  <div class="bar">
+    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="title">{title}</span>
+    <div class="tabs" role="tablist" aria-label="Commands">
+      {
+        tabs.map((tab, index) => (
+          <button
+            type="button"
+            role="tab"
+            id={`console-tab-${tab.id}`}
+            aria-controls={`console-panel-${tab.id}`}
+            aria-selected={index === 0 ? 'true' : 'false'}
+            tabindex={index === 0 ? 0 : -1}
+          >
+            {tab.label}
+          </button>
+        ))
+      }
+    </div>
+  </div>
+  {
+    tabs.map((tab, index) => (
+      <div
+        class="panel"
+        role="tabpanel"
+        id={`console-panel-${tab.id}`}
+        aria-labelledby={`console-tab-${tab.id}`}
+        hidden={index !== 0}
+      >
+        <pre><code set:html={paint(tab.output)} /></pre>
+      </div>
+    ))
+  }
+</figure>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-console]')) {
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const select = (chosen: HTMLButtonElement) => {
+      for (const tab of tabs) {
+        const on = tab === chosen;
+        tab.setAttribute('aria-selected', String(on));
+        tab.tabIndex = on ? 0 : -1;
+        const panel = root.querySelector<HTMLElement>(`#${tab.getAttribute('aria-controls')}`);
+        if (panel) panel.hidden = !on;
+      }
+    };
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (event) => {
+        const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+        if (!step) return;
+        const next = tabs[(index + step + tabs.length) % tabs.length];
+        select(next);
+        next.focus();
+      });
+    });
+  }
+</script>
+
+<style>
+  .console {
+    margin: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--bg);
+    box-shadow: 0 30px 80px -40px var(--shadow-color);
+    overflow: hidden;
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-raised);
+  }
+
+  .dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .dots i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--line-strong);
+  }
+
+  .title {
+    font: 500 0.75rem/1 var(--font-mono);
+    color: var(--fg-faint);
+    letter-spacing: 0.06em;
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  .tabs button {
+    padding: 5px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--fg-muted);
+    font: 600 0.72rem/1.2 var(--font-mono);
+    cursor: pointer;
+    transition:
+      color 140ms ease,
+      border-color 140ms ease,
+      background-color 140ms ease;
+  }
+
+  .tabs button:hover {
+    color: var(--fg);
+    border-color: var(--line-strong);
+  }
+
+  .tabs button[aria-selected='true'] {
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .tabs button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .panel[hidden] {
+    display: none;
+  }
+
+  pre {
+    margin: 0;
+    padding: 20px 22px 24px;
+    min-height: 23.5em;
+    overflow-x: auto;
+    font: 400 0.8rem/1.7 var(--font-mono);
+    color: var(--fg-muted);
+  }
+
+  pre :global(.prompt) {
+    color: var(--accent);
+  }
+
+  pre :global(.cmd) {
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  pre :global(.step) {
+    color: var(--byte);
+  }
+
+  pre :global(.ok) {
+    color: var(--byte);
+    font-weight: 600;
+  }
+
+  pre :global(.bad) {
+    color: var(--f5);
+    font-weight: 600;
+  }
+
+  pre :global(.kind) {
+    color: var(--fg-faint);
+  }
+
+  @media (max-width: 560px) {
+    pre {
+      min-height: 0;
+      font-size: 0.72rem;
+      padding: 16px;
+    }
+  }
+</style>

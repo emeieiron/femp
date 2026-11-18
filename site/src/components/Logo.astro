@@ -1,0 +1,53 @@
+---
+// Iron's tile from the periodic table: atomic number 26, symbol Fe.
+---
+
+<span class="logo" aria-hidden="true">
+  <span class="tile">
+    <span class="number">26</span>
+    <span class="symbol">Fe</span>
+  </span>
+  <span class="word">MP</span>
+</span>
+
+<style>
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .tile {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: 1.5px solid var(--accent);
+    border-radius: 4px;
+    background: var(--accent-soft);
+  }
+
+  .number {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    font: 600 7.5px/1 var(--font-mono);
+    color: var(--accent);
+  }
+
+  .symbol {
+    margin-top: 5px;
+    font: 750 17px/1 var(--font-display);
+    font-stretch: 90%;
+    letter-spacing: -0.03em;
+    color: var(--fg);
+  }
+
+  .word {
+    font: 700 1.12rem/1 var(--font-display);
+    font-stretch: 88%;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+  }
+</style>

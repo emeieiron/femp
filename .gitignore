@@ -4,3 +4,6 @@ dist/
 out/
 node_modules/
 .DS_Store
+
+# The documentation site
+/site/.astro/

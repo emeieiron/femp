@@ -1,0 +1,1324 @@
+---
+import { Code } from 'astro:components';
+import Base from '../layouts/Base.astro';
+import Console from '../components/Console.astro';
+import CopyCommand from '../components/CopyCommand.astro';
+import fe from '../lib/fe.tmLanguage.json';
+import { repo, url } from '../lib/site';
+import * as outputs from '../lib/outputs';
+
+const install = 'curl -fsSL https://github.com/emeieiron/femp/releases/latest/download/installer.sh | sh';
+
+const shared = `/// The fee on \`amount\` at a rate in basis points, rounded down.
+pub fn fee(amount: u64, rate: u64) -> u64 {
+    let capped = if rate > BASIS_POINTS { BASIS_POINTS } else { rate }
+    let scaled = (amount as u256) * (capped as u256) / (BASIS_POINTS as u256)
+    scaled.downcast_unchecked()
+}`;
+
+const spec = `use femp_spec::ensures
+
+/// What \`fee\` promises for every input:
+/// it never charges more than the amount.
+#[spec]
+pub fn fee_spec(amount: u64, rate: u64) -> u64 {
+    let charged = fee(amount, rate)
+    ensures(charged <= amount)
+    charged
+}`;
+
+const property = `#[property(cases = 500)]
+#[gen(cliff = "0..=10_000", duration = "1..=10_000")]
+pub fn vested_never_exceeds_total(
+    total: u64,
+    start: u64,
+    cliff: u64,
+    duration: u64,
+    now: u64,
+) -> bool {
+    match Schedule::new(total, start, cliff, duration) {
+        Result::Ok(schedule) => schedule.vested_at(now) <= total,
+        Result::Err(_) => true,
+    }
+}`;
+
+const invariant = `/// The contract never pays out more than the total.
+#[invariant]
+fn claims_stay_within_total(store: VestingStore) -> bool {
+    store.claimed <= store.total
+}`;
+
+const generator = `[modules.core.generate.serializers]
+command = ["fe_codec_gen", "--source", "src/models.fe", "--stdout"]
+output = "src/serializers.fe"`;
+
+const platform = `// femp_core::platform, abridged
+pub trait Platform {
+    fn id(&self) -> &PlatformId;
+    fn capability(&self, environment: &Environment) -> Capability;
+    fn check(&self, cx: &Context<'_>, module: &Module) -> Result<()>;
+    fn build(&self, cx: &Context<'_>, module: &Module, out_dir: &Path)
+        -> Result<Vec<Artifact>>;
+    fn test(&self, cx: &Context<'_>, module: &Module, filter: Option<&str>)
+        -> Result<TestRun>;
+    // fe_target, stability, binding_kinds, bindings, package,
+    // property_harness, deployer
+}`;
+
+const targets = [
+  {
+    id: 'evm',
+    module: 'contracts',
+    files: ['Fees.bin', 'Fees.abi.json', 'Fees.ts'],
+    call: 'FeesMsg::Fee { amount: 20000, rate: 250 }',
+    result: '500',
+  },
+  {
+    id: 'native',
+    module: 'cli',
+    files: ['my_app_cli'],
+    call: './my_app_cli 20000 250',
+    result: '500',
+  },
+  {
+    id: 'wasm',
+    module: 'web',
+    files: ['my_app_web.wasm', 'my_app_web.js', 'my_app_web.d.ts'],
+    call: 'app.fee(20000n, 250n)',
+    result: '500n',
+  },
+];
+
+// `femp test` with one test that overflows a 32-bit usize.
+const matrix = [
+  { name: 'core::caps_the_rate', cells: ['pass', 'pass', 'pass'] },
+  { name: 'core::charges_the_rate', cells: ['pass', 'pass', 'pass'] },
+  { name: 'core::counts_past_four_billion', cells: ['pass', 'pass', 'FAIL'] },
+  { name: 'core::rounds_down', cells: ['pass', 'pass', 'pass'] },
+];
+
+type Cell = 'yes' | 'partial' | 'no';
+const compare: { what: string; fe: [Cell, string]; femp: [Cell, string] }[] = [
+  { what: 'EVM contracts', fe: ['yes', 'Bytecode, ABI, metadata'], femp: ['yes', 'The same bytes, plus TypeScript bindings'] },
+  { what: 'Native programs', fe: ['yes', 'Executables, objects, static libraries'], femp: ['partial', 'Executables'] },
+  { what: 'WebAssembly', fe: ['no', 'Not in the release build'], femp: ['yes', 'Modules, JS/TS bindings, host runtime'] },
+  { what: 'Several targets in one project', fe: ['no', 'Workspace members share one target'], femp: ['yes', 'Shared code, checked for every platform'] },
+  { what: 'Unit tests', fe: ['partial', 'EVM or native, per ingot'], femp: ['yes', 'Every platform side by side; divergence fails'] },
+  { what: 'Generated inputs, differentials', fe: ['no', '—'], femp: ['yes', 'femp prop, with shrinking and regressions'] },
+  { what: 'Proofs for all inputs', fe: ['no', '—'], femp: ['yes', 'femp prove, with Z3'] },
+  { what: 'Source generators', fe: ['no', '—'], femp: ['yes', 'FSGP, run before every command'] },
+  { what: 'Formatter, language server, docs', fe: ['yes', 'fe fmt, fe lsp, fe doc'], femp: ['no', 'Use fe’s alongside'] },
+  { what: 'Gas benchmarks, EVM traces', fe: ['yes', 'fe bench, fe test traces'], femp: ['no', '—'] },
+  { what: 'Compiler release', fe: ['yes', 'Any you install'], femp: ['partial', 'The one femp links: 26.6.0'] },
+];
+const mark: Record<Cell, string> = { yes: '●', partial: '◐', no: '○' };
+---
+
+<Base
+  title="FeMP · One Fe codebase, every target, proved to agree"
+  description="FeMP builds one Fe codebase into EVM contracts, native programs and WebAssembly modules, and tests and proves that every target computes the same thing."
+  current="home"
+>
+  <section class="hero">
+    <div class="grid-paper" aria-hidden="true"></div>
+    <div class="container hero-inner">
+      <div class="hero-copy">
+        <p class="eyebrow rise" style="--i: 0">Fe Multiplatform</p>
+        <h1 class="rise" style="--i: 1">One codebase.<br /><span>Proved to agree.</span></h1>
+        <p class="lede rise" style="--i: 2">
+          FeMP builds one Fe codebase into EVM contracts, native programs and WebAssembly modules.
+          The same tests, generated inputs and proofs then run against every compiled target, so a
+          platform that computes something different fails the build instead of a user.
+        </p>
+        <div class="actions rise" style="--i: 3">
+          <a class="button button-primary" href={url('docs/quick-start/')}>
+            Quick start
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+          </a>
+          <a class="button" href={url('docs/fe-and-femp/')}>How it relates to fe</a>
+        </div>
+      </div>
+      <div class="hero-install rise" style="--i: 4">
+        <p class="install-label">Install: femp, the Fe 26.6.0 compiler, Z3 and Node.js</p>
+        <CopyCommand command={install} label="Copy the install command" />
+        <dl class="specs">
+          <div><dt>Targets</dt><dd>EVM · native · WebAssembly</dd></div>
+          <div><dt>Checks</dt><dd>Tests · properties · differentials · proofs</dd></div>
+          <div><dt>Compiler</dt><dd>Fe 26.6.0, linked in; byte-identical builds</dd></div>
+        </dl>
+      </div>
+    </div>
+    <div class="container console-wrap rise" style="--i: 5">
+      <Console
+        title="my-app · femp new"
+        tabs={[
+          { id: 'test', label: 'femp test', output: outputs.test },
+          { id: 'prop', label: 'femp prop', output: outputs.prop },
+          { id: 'prove', label: 'femp prove', output: outputs.prove },
+          { id: 'build', label: 'femp build', output: outputs.build },
+        ]}
+      />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="share-title">
+    <div class="container">
+      <header class="section-head">
+        <p class="eyebrow">§01 · Shared code</p>
+        <h2 id="share-title">Write the logic once.<br />Ship it three ways.</h2>
+        <p class="section-lede">
+          A shared ingot holds the logic. Thin platform modules expose it as a contract, a
+          command-line program and a JavaScript module. <code>femp check</code> type-checks the
+          shared code once for every platform, and layering rules keep platform-only capabilities
+          out of it.
+        </p>
+      </header>
+
+      <div class="fanout">
+        <div class="source">
+          <p class="pane-label"><span>shared/src/lib.fe</span><span class="meta">no target</span></p>
+          <Code code={shared} lang={fe} theme="css-variables" />
+        </div>
+        <ol class="outputs">
+          {
+            targets.map((target) => (
+              <li>
+                <p class="target-head">
+                  <span class="kbd-chip">{target.id}</span>
+                  <span class="module">build/{target.id}/{target.module}/</span>
+                </p>
+                <p class="files">
+                  {target.files.map((file) => (
+                    <code>{file}</code>
+                  ))}
+                </p>
+                <p class="call">
+                  <code>{target.call}</code>
+                  <span class="result">{target.result}</span>
+                </p>
+              </li>
+            ))
+          }
+        </ol>
+      </div>
+      <p class="fine under">
+        The contract's bytecode is what <code>fe build</code> writes, byte for byte. The TypeScript
+        module, the WebAssembly bindings and the host runtime are FeMP's.{' '}
+        <a href={url('docs/bindings/')}>Outputs and bindings →</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="agree-title">
+    <div class="container">
+      <header class="section-head">
+        <p class="eyebrow">§02 · Agreement, tested</p>
+        <h2 id="agree-title">The same test,<br />compiled three times.</h2>
+        <p class="section-lede">
+          <code>femp test</code> runs every shared test on the EVM, natively and in WebAssembly, and
+          fails on a divergence. Here a <code>usize</code> addition overflows only where
+          <code>usize</code> is 32 bits wide.
+        </p>
+      </header>
+
+      <div class="matrix-card">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th scope="col">Shared test</th>
+              <th scope="col">evm</th>
+              <th scope="col">native</th>
+              <th scope="col">wasm</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              matrix.map((row) => (
+                <tr class={row.cells.includes('FAIL') ? 'diverges' : undefined}>
+                  <th scope="row">{row.name}</th>
+                  {row.cells.map((cell) => (
+                    <td class={cell === 'FAIL' ? 'bad' : 'ok'}>{cell}</td>
+                  ))}
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+        <p class="divergence">
+          <span>error</span> divergence: core::counts_past_four_billion passes on evm, native but fails on wasm
+        </p>
+      </div>
+
+      <div class="bento">
+        <article class="card">
+          <h3>Properties</h3>
+          <p>
+            <code>femp prop</code> calls a <code>#[property]</code> with generated inputs, biased
+            toward boundaries, on every target. A failure is shrunk to a minimal counterexample and
+            replayed on every later run.
+          </p>
+          <Code code={property} lang={fe} theme="css-variables" />
+          <a class="more" href={url('docs/property-testing/')}>Property testing →</a>
+        </article>
+
+        <article class="card">
+          <h3>Differentials</h3>
+          <p>
+            A <code>#[differential]</code> passes when every target, and every <code>-O</code> level,
+            computes the same outcome. Here one platform's variant rounds differently from 1000 on:
+          </p>
+          <pre class="report"><span class="bad">FAIL</span>  core::rounding  diverges across targets after 2 cases
+      x = 1000
+      evm     returned 1000
+      native  returned 1000
+      wasm    returned 999</pre>
+          <a class="more" href={url('docs/differential-testing/')}>Differential testing →</a>
+        </article>
+
+        <article class="card">
+          <h3>State machines</h3>
+          <p>
+            A <code>#[machine]</code> runs sequences of commands and checks its invariants after
+            every step, on every target. A failure shrinks to the shortest sequence:
+          </p>
+          <pre class="report">new()
+1. add(amount = 10)
+2. add(amount = 10)
+3. add(amount = 10)
+evm     invariant `few_big_adds` fails after step 3
+native  invariant `few_big_adds` fails after step 3
+wasm    invariant `few_big_adds` fails after step 3</pre>
+          <a class="more" href={url('docs/property-testing/#machines')}>Machines →</a>
+        </article>
+
+        <article class="card">
+          <h3>Contracts</h3>
+          <p>
+            Storage invariants and message claims are tested on the deployed contract with
+            generated transactions, then proved by induction over every message.
+          </p>
+          <Code code={invariant} lang={fe} theme="css-variables" />
+          <p class="fine">Against a <code>Claim</code> handler that forgets earlier claims:</p>
+          <pre class="report">init(total = 1, start = 0, cliff = 0, duration = 1)
+1. Claim(amount = 1)  (+1s)
+2. Claim(amount = 1)
+evm  invariant `claims_stay_within_total` fails after step 2</pre>
+          <a class="more" href={url('docs/contracts/')}>Contracts →</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section proof" aria-labelledby="proof-title">
+    <div class="container proof-inner">
+      <div>
+        <p class="eyebrow">§03 · Proved</p>
+        <h2 id="proof-title">For every input,<br />not just the ones you tried.</h2>
+        <p class="section-lede">
+          <code>femp prove</code> reads the same claims, plus <code>#[spec]</code> functions and a
+          contract's invariants, lowers the code with the compiler's own front end and asks Z3
+          whether anything can break them. A counterexample is minimized, run on the compiled
+          targets, and saved as a regression.
+        </p>
+        <Code code={spec} lang={fe} theme="css-variables" />
+        <a class="more" href={url('docs/proving/')}>Proving →</a>
+      </div>
+      <div class="verdicts" aria-label="femp prove on the vesting example">
+        <p class="pane-label"><span>femp prove · vesting example</span><span class="meta">Z3</span></p>
+        <ul>
+          {
+            outputs.vesting.map(([verdict, name, where]) => (
+              <li>
+                <span class="ok">{verdict}</span>
+                <span class="claim">{name}</span>
+                <span class="where">{where}</span>
+              </li>
+            ))
+          }
+        </ul>
+        <pre class="report refuted" set:html={outputs.refuted.replace(/^REFUTED/, '<span class="bad">REFUTED</span>')} />
+        <p class="fine">
+          A refuted claim comes back with its counterexample, run on every compiled target. A
+          counterexample the targets do not reproduce fails the run.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="compare-title">
+    <div class="container">
+      <header class="section-head">
+        <p class="eyebrow">§04 · FeMP and fe</p>
+        <h2 id="compare-title">Built on the compiler,<br />not beside it.</h2>
+        <p class="section-lede">
+          FeMP links the official Fe compiler and calls it for every check, build and test. It adds
+          no language features. What it adds is a project that spans targets, and the tools that
+          hold those targets to each other.
+        </p>
+      </header>
+
+      <div class="compare-wrap">
+        <table class="compare">
+          <thead>
+            <tr>
+              <th scope="col"><span class="sr-only">Capability</span></th>
+              <th scope="col">fe</th>
+              <th scope="col">FeMP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              compare.map((row) => (
+                <tr>
+                  <th scope="row">{row.what}</th>
+                  <td class={row.fe[0]} data-label="fe">
+                    <span class="mark" aria-hidden="true">{mark[row.fe[0]]}</span>
+                    {row.fe[1]}
+                  </td>
+                  <td class={row.femp[0]} data-label="FeMP">
+                    <span class="mark" aria-hidden="true">{mark[row.femp[0]]}</span>
+                    {row.femp[1]}
+                  </td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="choose">
+        <article>
+          <h3>Use plain fe when</h3>
+          <ul>
+            <li>you build for one target and need only unit tests;</li>
+            <li>you publish a library ingot for others to depend on;</li>
+            <li>you need a newer compiler release than FeMP links.</li>
+          </ul>
+        </article>
+        <article>
+          <h3>Use FeMP when</h3>
+          <ul>
+            <li>the same logic runs on chain and off chain;</li>
+            <li>you need WebAssembly with typed bindings;</li>
+            <li>correctness matters more than examples can show.</li>
+          </ul>
+        </article>
+      </div>
+      <p class="fine under">
+        FeMP projects are Fe ingots, so <code>fe fmt</code>, <code>fe lsp</code> and <code>fe doc</code>
+        work on them unchanged.{' '}<a href={url('docs/fe-and-femp/')}>The full comparison →</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="start-title">
+    <div class="container">
+      <header class="section-head">
+        <p class="eyebrow">§05 · Quick start</p>
+        <h2 id="start-title">From nothing to proved<br />in five commands.</h2>
+      </header>
+
+      <ol class="steps">
+        <li class="step">
+          <p class="step-num" aria-hidden="true">01</p>
+          <div class="step-text">
+            <h3>Install</h3>
+            <p>femp, with the compiler and every backend built in, plus Z3 and Node.js.</p>
+          </div>
+          <div class="step-code">
+            <CopyCommand command={install} label="Copy the install command" />
+          </div>
+        </li>
+        <li class="step">
+          <p class="step-num" aria-hidden="true">02</p>
+          <div class="step-text">
+            <h3>Create</h3>
+            <p>A shared module, one module per platform, and the spec library.</p>
+          </div>
+          <div class="step-code">
+            <CopyCommand command="femp new my-app && cd my-app" label="Copy the create command" />
+          </div>
+        </li>
+        <li class="step">
+          <p class="step-num" aria-hidden="true">03</p>
+          <div class="step-text">
+            <h3>Test everywhere</h3>
+            <p>Every shared test on every platform, compared side by side.</p>
+          </div>
+          <div class="step-code">
+            <CopyCommand command="femp test" label="Copy the test command" />
+          </div>
+        </li>
+        <li class="step">
+          <p class="step-num" aria-hidden="true">04</p>
+          <div class="step-text">
+            <h3>Prove</h3>
+            <p>The template's fee spec, for all 2¹²⁸ inputs, on each platform's program.</p>
+          </div>
+          <div class="step-code">
+            <CopyCommand command="femp prove" label="Copy the prove command" />
+          </div>
+        </li>
+        <li class="step">
+          <p class="step-num" aria-hidden="true">05</p>
+          <div class="step-text">
+            <h3>Ship</h3>
+            <p>Every output under <code>dist/</code>, with a manifest of SHA-256 hashes.</p>
+          </div>
+          <div class="step-code">
+            <CopyCommand command="femp package" label="Copy the package command" />
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="extend-title">
+    <div class="container">
+      <header class="section-head">
+        <p class="eyebrow">§06 · Extend</p>
+        <h2 id="extend-title">Extend it at the edges.</h2>
+      </header>
+      <div class="extend">
+        <article class="card">
+          <h3>Source generators</h3>
+          <p>
+            A module declares programs that print Fe source. FeMP runs them before every command
+            and compiles their output into a staged copy, so generated code is never stale and never
+            checked in. The protocol is a command line in and Fe source out.
+          </p>
+          <Code code={generator} lang="toml" theme="css-variables" />
+          <a class="more" href={url('docs/source-generators/')}>The protocol →</a>
+        </article>
+        <article class="card">
+          <h3>New platforms</h3>
+          <p>
+            A platform is one implementation of the <code>Platform</code> trait and one line in the
+            registry. It then takes part in every command, the parity matrix included.
+          </p>
+          <Code code={platform} lang="rust" theme="css-variables" />
+          <a class="more" href={url('docs/adding-a-platform/')}>Adding a platform →</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section closing">
+    <div class="container closing-inner">
+      <h2>Write it once. Check it everywhere.</h2>
+      <div class="actions">
+        <a class="button button-primary" href={url('docs/quick-start/')}>Quick start</a>
+        <a class="button" href={repo}>View the source</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  /* ---- Hero ---- */
+  .hero {
+    position: relative;
+    padding: clamp(48px, 8vw, 96px) 0 24px;
+    overflow: hidden;
+  }
+
+  .grid-paper {
+    position: absolute;
+    inset: 0 0 30% 0;
+    z-index: -1;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(ellipse 80% 75% at 30% 20%, #000 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 75% at 30% 20%, #000 30%, transparent 75%);
+  }
+
+  .hero-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: clamp(32px, 5vw, 72px);
+    align-items: end;
+  }
+
+  h1 {
+    margin-top: 22px;
+    font-size: clamp(3.1rem, 8.4vw, 6.6rem);
+    font-weight: 800;
+    font-stretch: 78%;
+    line-height: 0.92;
+    letter-spacing: -0.035em;
+  }
+
+  h1 span {
+    color: var(--accent);
+  }
+
+  .lede {
+    margin-top: 26px;
+    max-width: 58ch;
+    font-size: clamp(1.02rem, 1.4vw, 1.14rem);
+    color: var(--fg-muted);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 32px;
+  }
+
+  .hero-install {
+    display: grid;
+    gap: 12px;
+    padding-bottom: 8px;
+    min-width: 0;
+  }
+
+  .install-label {
+    font: 500 0.74rem/1.4 var(--font-mono);
+    color: var(--fg-faint);
+    letter-spacing: 0.04em;
+  }
+
+  .specs {
+    display: grid;
+    margin: 8px 0 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .specs div {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.86rem;
+  }
+
+  .specs dt {
+    font: 500 0.68rem/1.9 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .specs dd {
+    margin: 0;
+    color: var(--fg);
+  }
+
+  .console-wrap {
+    margin-top: clamp(40px, 6vw, 72px);
+  }
+
+  /* ---- Sections ---- */
+  .section {
+    padding-top: clamp(80px, 11vw, 140px);
+  }
+
+  .section-head {
+    max-width: 760px;
+    margin-bottom: 44px;
+  }
+
+  .section-head h2,
+  .proof h2,
+  .closing h2 {
+    margin-top: 16px;
+    font-size: clamp(2rem, 4.4vw, 3.2rem);
+    font-stretch: 82%;
+  }
+
+  .section-lede {
+    margin-top: 18px;
+    max-width: 62ch;
+    color: var(--fg-muted);
+    font-size: 1.04rem;
+  }
+
+  code {
+    font-size: 0.88em;
+  }
+
+  p code,
+  li code,
+  dd code {
+    padding: 0.06em 0.22em;
+    border-radius: 3px;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  .fine {
+    font-size: 0.86rem;
+    color: var(--fg-faint);
+  }
+
+  .fine a,
+  .more {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .more {
+    margin-top: auto;
+    font-size: 0.92rem;
+  }
+
+  .fine a:hover,
+  .more:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .under {
+    margin-top: 18px;
+  }
+
+  .pane-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 18px;
+    border-bottom: 1px dashed var(--line);
+    font: 500 0.72rem/1 var(--font-mono);
+    letter-spacing: 0.05em;
+    color: var(--fg-muted);
+  }
+
+  .pane-label .meta {
+    color: var(--byte);
+  }
+
+  .report {
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg);
+    overflow-x: auto;
+    font: 400 0.76rem/1.7 var(--font-mono);
+    color: var(--fg-muted);
+  }
+
+  .ok {
+    color: var(--byte);
+  }
+
+  .bad,
+  .report :global(.bad) {
+    color: var(--f5);
+    font-weight: 600;
+  }
+
+  /* ---- One codebase, three outputs ---- */
+  .fanout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--bg-raised);
+    overflow: hidden;
+  }
+
+  .source {
+    min-width: 0;
+    border-right: 1px solid var(--line);
+  }
+
+  .source :global(pre.astro-code) {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    font-size: 0.8rem;
+  }
+
+  .outputs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+  }
+
+  .outputs li {
+    position: relative;
+    display: grid;
+    gap: 10px;
+    padding: 20px 22px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  .outputs li:last-child {
+    border-bottom: 0;
+  }
+
+  /* The branch from the shared source into each output. */
+  .outputs li::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: 50%;
+    width: 14px;
+    height: 1.5px;
+    background: var(--accent);
+  }
+
+  .target-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .module {
+    font: 500 0.76rem/1 var(--font-mono);
+    color: var(--fg-faint);
+  }
+
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .files code {
+    font-size: 0.74rem;
+    background: var(--bg-elevated);
+  }
+
+  .call {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .call code {
+    overflow-x: auto;
+    background: none;
+    padding: 0;
+    color: var(--fg-muted);
+    font-size: 0.76rem;
+  }
+
+  .result {
+    flex: none;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--byte) 14%, transparent);
+    color: var(--byte);
+    font: 600 0.78rem/1.4 var(--font-mono);
+  }
+
+  /* ---- Parity matrix ---- */
+  .matrix-card {
+    margin-bottom: 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--bg);
+    overflow-x: auto;
+  }
+
+  .matrix {
+    width: 100%;
+    border-collapse: collapse;
+    font: 400 0.84rem/1.4 var(--font-mono);
+  }
+
+  .matrix th,
+  .matrix td {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .matrix thead th {
+    background: var(--bg-raised);
+    font: 500 0.7rem/1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .matrix tbody th {
+    font-weight: 400;
+    color: var(--fg);
+  }
+
+  .matrix td {
+    width: 110px;
+  }
+
+  .matrix .diverges {
+    background: color-mix(in srgb, var(--f5) 7%, transparent);
+  }
+
+  .divergence {
+    padding: 14px 20px;
+    font: 400 0.8rem/1.5 var(--font-mono);
+    color: var(--fg-muted);
+  }
+
+  .divergence span {
+    margin-right: 8px;
+    color: var(--f5);
+    font-weight: 600;
+  }
+
+  /* ---- Bento ---- */
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg-raised);
+    color: var(--fg-muted);
+    transition: border-color 200ms ease;
+  }
+
+  .card:hover {
+    border-color: var(--line-strong);
+  }
+
+  .card h3 {
+    font-size: 1.34rem;
+    color: var(--fg);
+  }
+
+  .card :global(pre.astro-code) {
+    margin: 0;
+    font-size: 0.78rem;
+  }
+
+  /* ---- Proofs ---- */
+  .proof-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(32px, 5vw, 72px);
+    align-items: start;
+  }
+
+  .proof-inner > div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .proof-inner :global(pre.astro-code) {
+    font-size: 0.8rem;
+  }
+
+  .verdicts {
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background:
+      repeating-linear-gradient(
+        -45deg,
+        transparent 0 10px,
+        color-mix(in srgb, var(--accent) 4%, transparent) 10px 11px
+      ),
+      var(--bg-raised);
+    overflow: hidden;
+  }
+
+  .verdicts ul {
+    list-style: none;
+    margin: 0;
+    padding: 10px 0;
+  }
+
+  .verdicts li {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 7px 18px;
+    font: 400 0.78rem/1.5 var(--font-mono);
+  }
+
+  .verdicts li .ok {
+    font-weight: 600;
+  }
+
+  .claim {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg);
+  }
+
+  .where {
+    color: var(--fg-faint);
+  }
+
+  .refuted {
+    margin: 4px 18px 0;
+    background: var(--bg);
+    font-size: 0.72rem;
+    white-space: pre-wrap;
+  }
+
+  .verdicts .fine {
+    padding: 14px 18px 20px;
+  }
+
+  /* ---- Comparison ---- */
+  .compare-wrap {
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    overflow-x: auto;
+  }
+
+  .compare {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+  }
+
+  .compare th,
+  .compare td {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .compare tbody tr:last-child > * {
+    border-bottom: 0;
+  }
+
+  .compare thead th {
+    background: var(--bg-raised);
+    font: 700 1.1rem/1 var(--font-display);
+    font-stretch: 85%;
+    color: var(--fg);
+  }
+
+  .compare thead th:last-child {
+    color: var(--accent);
+  }
+
+  .compare tbody th {
+    width: 30%;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .compare td {
+    width: 35%;
+    color: var(--fg-muted);
+  }
+
+  .compare td:last-child {
+    background: color-mix(in srgb, var(--accent) 4%, transparent);
+  }
+
+  .mark {
+    display: inline-block;
+    width: 1.4em;
+    font-size: 0.82em;
+  }
+
+  .compare .yes .mark {
+    color: var(--byte);
+  }
+
+  .compare .partial .mark {
+    color: var(--f3);
+  }
+
+  .compare .no {
+    color: var(--fg-faint);
+  }
+
+  .compare .no .mark {
+    color: var(--line-strong);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .choose {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+  }
+
+  .choose article {
+    padding: 24px 26px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--fg-muted);
+  }
+
+  .choose article:last-child {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+    background: var(--accent-soft);
+  }
+
+  .choose h3 {
+    font-size: 1.2rem;
+    color: var(--fg);
+  }
+
+  .choose ul {
+    margin: 12px 0 0;
+    padding-left: 1.1em;
+    display: grid;
+    gap: 6px;
+  }
+
+  /* ---- Steps ---- */
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .step {
+    position: relative;
+    display: grid;
+    grid-template-columns: 56px minmax(0, 0.85fr) minmax(0, 2fr);
+    gap: 0 clamp(20px, 3vw, 44px);
+    align-items: center;
+    padding-bottom: 28px;
+    color: var(--fg-muted);
+  }
+
+  .step:last-child {
+    padding-bottom: 0;
+  }
+
+  .step:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 27px;
+    top: 56px;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(var(--accent), var(--line) 60%);
+  }
+
+  .step-num {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border: 1.5px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent-soft);
+    font: 600 0.95rem/1 var(--font-mono);
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+
+  .step-text {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .step h3 {
+    font-size: 1.4rem;
+    color: var(--fg);
+  }
+
+  .step-code {
+    min-width: 0;
+  }
+
+  /* ---- Extend ---- */
+  .extend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  /* ---- Closing ---- */
+  .closing-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding-top: 48px;
+    border-top: 1px solid var(--line);
+  }
+
+  .closing h2 {
+    margin: 0;
+  }
+
+  .closing .actions {
+    margin: 0;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 1080px) {
+    .hero-inner,
+    .proof-inner,
+    .fanout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .source {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .outputs li::before {
+      display: none;
+    }
+
+    .step {
+      grid-template-columns: 44px minmax(0, 1fr);
+      row-gap: 14px;
+    }
+
+    .step-code {
+      grid-column: 2;
+    }
+
+    .step-num {
+      width: 44px;
+      height: 44px;
+      font-size: 0.82rem;
+    }
+
+    .step:not(:last-child)::before {
+      left: 21px;
+      top: 44px;
+    }
+  }
+
+  @media (max-width: 720px) {
+    /* The comparison stacks: each capability, then what fe and FeMP do for it. */
+    .compare {
+      min-width: 0;
+    }
+
+    .compare thead {
+      display: none;
+    }
+
+    .compare tr,
+    .compare th,
+    .compare td {
+      display: block;
+      width: auto;
+    }
+
+    .compare tbody tr {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .compare tbody tr:last-child {
+      border-bottom: 0;
+    }
+
+    .compare tbody th,
+    .compare td {
+      width: auto;
+      padding: 0;
+      border: 0;
+    }
+
+    .compare td {
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      margin-top: 6px;
+      font-size: 0.86rem;
+    }
+
+    .compare td::before {
+      content: attr(data-label);
+      font: 600 0.72rem/1.9 var(--font-mono);
+      color: var(--fg-faint);
+    }
+
+    .compare td:last-child {
+      background: none;
+    }
+
+    .compare td:last-child::before {
+      color: var(--accent);
+    }
+
+    .compare .mark {
+      display: none;
+    }
+
+    .call code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .bento,
+    .choose,
+    .extend {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .verdicts li {
+      grid-template-columns: 64px minmax(0, 1fr);
+    }
+
+    .verdicts .where {
+      grid-column: 2;
+      margin-top: -6px;
+    }
+
+    .claim {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .step {
+      grid-template-columns: minmax(0, 1fr);
+      padding-bottom: 32px;
+    }
+
+    .step:not(:last-child)::before {
+      display: none;
+    }
+
+    .step-num {
+      width: 36px;
+      height: 36px;
+      font-size: 0.75rem;
+    }
+
+    .step-code {
+      grid-column: 1;
+    }
+
+    .matrix th,
+    .matrix td {
+      padding: 10px 14px;
+    }
+  }
+</style>
