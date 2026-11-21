@@ -1,5 +1,6 @@
 use tally_core::add
 
+#[unsafe(export)]
 pub fn total(start: u64, amount: u64) -> u64 {
     add(start, amount)
 }

@@ -56,6 +56,8 @@ pub struct Context<'a> {
     pub project: &'a Project,
     pub environment: &'a Environment,
     pub optimize: OptLevel,
+    /// Optional WebAssembly stack size override in bytes (from CLI).
+    pub wasm_stack_size: Option<u32>,
 }
 
 pub trait Platform {
@@ -68,6 +70,11 @@ pub trait Platform {
     fn capability(&self, environment: &Environment) -> Capability;
 
     fn binding_kinds(&self) -> &[&'static str];
+
+    /// Whether `[platform.<id>]` accepts a `stack_size` setting.
+    fn supports_stack_size(&self) -> bool {
+        false
+    }
 
     fn check(&self, cx: &Context<'_>, module: &Module) -> Result<()>;
 

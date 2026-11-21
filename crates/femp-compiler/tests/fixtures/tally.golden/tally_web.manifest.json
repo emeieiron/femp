@@ -2,14 +2,24 @@
   "manifest_version": 1,
   "module": {
     "file": "tally_web.wasm",
-    "sha256": "a157dbee37a9d2648194f68bc10c82020690440077c0600d619678a0beba5c74",
-    "size": 117,
-    "initial_memory_pages": 1
+    "sha256": "704609120760bdc9224ac228c5cc86762f65d37f191ff43092e540b480f8a256",
+    "size": 346,
+    "initial_memory_pages": 17
   },
-  "contract_version": 1,
+  "contract_version": 3,
   "optimization": "1",
-  "compiler": "fe 26.6.0 (5b3f96a)",
-  "imports": [],
+  "compiler": "fe 26.7.0 (e6e6342)",
+  "imports": [
+    {
+      "module": "env",
+      "name": "__fe_revert",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32"],
+        "results": []
+      }
+    }
+  ],
   "exports": [
     {
       "name": "memory",

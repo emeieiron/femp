@@ -21,7 +21,11 @@ pub struct WasmModule {
 }
 
 impl Session {
-    pub fn build_wasm(&self, optimize: OptLevel) -> Result<WasmModule, CompileError> {
+    pub fn build_wasm(
+        &self,
+        optimize: OptLevel,
+        stack_size: Option<u32>,
+    ) -> Result<WasmModule, CompileError> {
         let db = &self.db;
         let root = self.ingot().root_mod(db);
         let level = opt_level(optimize);
@@ -34,6 +38,7 @@ impl Session {
                     ir: false,
                     wasm: true,
                 },
+                stack_size,
             )
         })?;
         let wasm = artifacts.wasm.ok_or_else(|| {

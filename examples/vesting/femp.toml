@@ -3,7 +3,7 @@ name = "vesting"
 version = "0.1.0"
 
 [toolchain]
-fe = "26.6.0"
+fe = "26.7.0"
 
 [modules.core]
 path = "shared"

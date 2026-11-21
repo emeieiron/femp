@@ -10,7 +10,7 @@ name = "vesting"
 version = "0.1.0"
 
 [toolchain]
-fe = "26.6.0"            # optional; must be the release femp is built with
+fe = "26.7.0"            # optional; must be the release femp is built with
 
 [modules.core]           # no platform: a shared module
 path = "shared"
@@ -29,12 +29,15 @@ platform = "wasm"
 
 [platform.wasm]          # optional per-platform settings
 bindings = ["typescript"]
+stack_size = 1048576     # optional; WebAssembly linear-memory stack in bytes
 ```
 
 - **`[modules.<name>]`** — `path` is the ingot's directory. `platform` names the platform the
   module is built for; leave it out for a shared module.
 - **`[platform.<id>]`** — `bindings` lists the binding kinds to generate. Left out, the platform
-  generates everything it offers; `bindings = []` turns generation off.
+  generates everything it offers; `bindings = []` turns generation off. On `wasm`, `stack_size`
+  sets the linear-memory stack size in bytes (the compiler defaults to 1 MiB); `--wasm-stack-size`
+  on `femp build` or `femp package` overrides it for one run.
 
 Dependencies between modules are not repeated here. They are read from each ingot's own
 `fe.toml`, where the compiler needs them anyway:
@@ -123,6 +126,7 @@ impl Clock for HostTime {
     fn now(self) -> u64 { self.seconds }
 }
 
+#[unsafe(export)]
 pub fn claimable_now(/* ... */) -> u64 uses (time: mut std::wasm::Clock) {
     with (Clock = HostTime { seconds: time.now_ms() / 1000 }) {
         vesting_core::claimable_now(position)
@@ -152,8 +156,9 @@ divergence if the variants disagree in a way a shared test observes.
 
 ## Writing portable tests
 
-- Assert on returned values, including `Result` errors. Reverts cannot be asserted on
-  WebAssembly, and `Result::unwrap` needs an error type that encodes as revert data.
+- Assert on returned values, including `Result` errors, or use `#[test(should_revert)]` (which
+  works on EVM, native and WebAssembly). `Result::unwrap` needs an error type that encodes as
+  revert data.
 - A test compiled for only some platforms (`#[cfg(target = ...)]`) is shown as `-` elsewhere and
   mentioned in a warning; it is not a failure.
 
@@ -173,8 +178,8 @@ dist/manifest.json            every packaged file with its kind and SHA-256
 
 ### WebAssembly modules
 
-Every non-generic `pub fn` in the root file (`src/lib.fe`) of a `wasm` module is exported.
-Parameters and results may be `bool`, integers of up to 64 bits, text in
+Every non-generic `#[unsafe(export)] pub fn` in a `wasm` module (in any file of the ingot) is
+exported. Parameters and results may be `bool`, integers of up to 64 bits, text in
 (`std::wasm::HostText`) and a tagged reply out (`std::wasm::Reply`). In the bindings, 64-bit
 integers are `bigint` and narrower ones `number`.
 

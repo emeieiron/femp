@@ -26,6 +26,10 @@ pub struct BuildInputs<'a> {
 
 impl BuildInputs<'_> {
     pub fn context(&self, optimize: OptLevel) -> Context<'_> {
+        self.context_with(optimize, None)
+    }
+
+    pub fn context_with(&self, optimize: OptLevel, wasm_stack_size: Option<u32>) -> Context<'_> {
         Context {
             project: self
                 .staged
@@ -33,6 +37,7 @@ impl BuildInputs<'_> {
                 .map_or(&self.session.project, |staged| &staged.project),
             environment: &self.session.environment,
             optimize,
+            wasm_stack_size,
         }
     }
 }

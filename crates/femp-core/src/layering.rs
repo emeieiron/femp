@@ -89,6 +89,9 @@ fn check_platform_sections(
                 ));
             }
         }
+        if section.stack_size.is_some() && !platform.supports_stack_size() {
+            violations.push(format!("platform `{name}` does not support `stack_size`"));
+        }
     }
 }
 
@@ -237,5 +240,16 @@ mod tests {
                 .iter()
                 .any(|v| v.contains("`[platform.desktop]` configures an unknown platform"))
         );
+    }
+
+    #[test]
+    fn stack_size_is_allowed_only_where_supported() {
+        let valid = format!("{MANIFEST}\n[platform.wasm]\nstack_size = 131072\n");
+        let found = violations(&valid, &[("shared", SHARED), ("evm", EVM), ("wasm", WASM)]);
+        assert!(found.is_empty(), "{found:?}");
+
+        let invalid = format!("{MANIFEST}\n[platform.evm]\nstack_size = 131072\n");
+        let found = violations(&invalid, &[("shared", SHARED), ("evm", EVM), ("wasm", WASM)]);
+        assert_eq!(found, ["platform `evm` does not support `stack_size`"]);
     }
 }

@@ -10,7 +10,7 @@ startup files, and sets up everything `femp` runs:
 
 | Component | Used for |
 | --- | --- |
-| `femp`, with the Fe 26.6.0 compiler and its EVM, native and WebAssembly backends built in | Every command. There is no separate `fe` to install. |
+| `femp`, with the Fe 26.7.0 compiler and its EVM, native and WebAssembly backends built in | Every command. There is no separate `fe` to install. |
 | Z3, in `~/.femp/z3` | `femp prove`. Its Linux builds need glibc 2.38 or newer; on older systems femp uses a `z3` from the system's package manager. |
 | Node.js, in `~/.femp/node`, when no Node.js 20 or newer is on `PATH` | Running WebAssembly. It is kept for femp alone and does not change which `node` other programs see. |
 | A C compiler, when none is found | Linking native executables: `gcc` from the system's package manager on Linux, Apple's Command Line Tools on macOS. The installer asks first, because this may need your password. |
@@ -37,7 +37,7 @@ can build. On a Mac set up by the installer:
 
 ```text
 Compiler
-  fe         26.6.0 (5b3f96a), linked into femp
+  fe         26.7.0 (e6e6342), linked into femp
   backends   sonatina, native, wasm
 Host
   system     aarch64 macos
@@ -50,7 +50,7 @@ Platforms
   wasm       experimental  available
 ```
 
-Native executables build on x86-64 Linux and Apple silicon. When a platform is unavailable,
+Native executables build on x86-64 Linux, AArch64 Linux and Apple silicon. When a platform is unavailable,
 `femp doctor` says why and how to fix it, and other commands skip it with a warning unless you
 name it with `-t`.
 

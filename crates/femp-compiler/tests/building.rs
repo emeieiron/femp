@@ -54,7 +54,7 @@ fn evm_contracts_match_the_compiler() {
 #[test]
 fn wasm_modules_match_the_compiler() {
     let module = open("web", Target::Wasm)
-        .build_wasm(OptLevel::default())
+        .build_wasm(OptLevel::default(), None)
         .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(module.file_name, "tally_web.wasm");
     assert_eq!(module.wasm, golden("tally_web.wasm"));
@@ -62,8 +62,27 @@ fn wasm_modules_match_the_compiler() {
 }
 
 #[test]
+fn wasm_stack_size_controls_initial_memory() {
+    let default_module = open("web", Target::Wasm)
+        .build_wasm(OptLevel::default(), None)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let larger_module = open("web", Target::Wasm)
+        .build_wasm(OptLevel::default(), Some(2 * 1024 * 1024))
+        .unwrap_or_else(|error| panic!("{error}"));
+    let pages = |manifest: &str| -> u64 {
+        let json: serde_json::Value = serde_json::from_str(manifest).unwrap();
+        json["module"]["initial_memory_pages"].as_u64().unwrap()
+    };
+    assert!(
+        pages(&larger_module.manifest) > pages(&default_module.manifest),
+        "2 MiB stack should reserve more initial memory pages than default 1 MiB"
+    );
+}
+
+#[test]
 #[cfg(any(
     all(target_arch = "x86_64", target_os = "linux"),
+    all(target_arch = "aarch64", target_os = "linux"),
     all(target_arch = "aarch64", target_os = "macos")
 ))]
 fn native_executables_run() {

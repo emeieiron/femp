@@ -9,6 +9,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use codegen::NativeTestEntry;
+use common::compilation::Platform;
 use hir::hir_def::HirIngot;
 
 use super::process::{self, quoted};
@@ -25,13 +26,11 @@ pub(super) fn run(
     session: &Session,
     options: &TestOptions<'_>,
 ) -> Result<Vec<Outcome>, CompileError> {
-    if !cfg!(any(
-        all(target_arch = "x86_64", target_os = "linux"),
-        all(target_arch = "aarch64", target_os = "macos")
-    )) {
-        return Err(CompileError::Failed(
-            "native tests run on x86-64 Linux and AArch64 macOS only".to_string(),
-        ));
+    if Platform::host().is_none() {
+        return Err(CompileError::Failed(format!(
+            "native tests require one of these hosts: {}",
+            Platform::supported_hosts()
+        )));
     }
     let db = &session.db;
     let mut modules = session.ingot().all_modules(db).to_vec();

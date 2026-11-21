@@ -17,8 +17,7 @@ Shared tests across platforms
     Parity every shared test behaves the same on all platforms it ran on`;
 
 export const prop = `$ femp prop
-PASS  core::fee_spec  256 cases on evm, native
-      not run on wasm: a WebAssembly module traps alike when a spec rejects a case and when it fails
+PASS  core::fee_spec  256 cases on evm, native, wasm
 
 1 passed, 0 failed (seed 0x000000000000002a, normalized comparison)`;
 

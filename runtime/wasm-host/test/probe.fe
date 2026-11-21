@@ -1,38 +1,47 @@
 // Exercises every value shape and host operation of the WebAssembly host
-// contract. `probe.wasm` and `probe.manifest.json` are built from this file:
-//
-//   fe build --backend wasm --out-dir runtime/wasm-host/test runtime/wasm-host/test/probe.fe
+// contract (version 3). `probe.wasm` and `probe.manifest.json` are built from
+// this file.
+use core::MemBuffer
+use std::io::{Stdin, StdinReader, Stdout}
 use std::wasm::{Abort, Clock, HostText, Log, Reply}
-use std::wasm::files::{Files, close, open, size}
+use std::wasm::files::{Files, close, open, read, size}
 
+#[unsafe(export)]
 pub fn add(a: u64, b: u64) -> u64 {
     a + b
 }
 
+#[unsafe(export)]
 pub fn negate(value: i32) -> i32 {
     0 - value
 }
 
+#[unsafe(export)]
 pub fn narrow(value: i8) -> i8 {
     value
 }
 
+#[unsafe(export)]
 pub fn widest(value: u32) -> u32 {
     value
 }
 
+#[unsafe(export)]
 pub fn is_even(value: u32) -> bool {
     value % 2 == 0
 }
 
+#[unsafe(export)]
 pub fn invert(value: bool) -> bool {
     !value
 }
 
+#[unsafe(export)]
 pub fn text_length(text: HostText) -> u32 {
     text.len()
 }
 
+#[unsafe(export)]
 pub fn double_up_to_100(value: u32) -> Reply {
     if value > 100 {
         Reply::error(7)
@@ -41,18 +50,40 @@ pub fn double_up_to_100(value: u32) -> Reply {
     }
 }
 
+#[unsafe(export)]
 pub fn stamp() -> u64 uses (clock: mut Clock) {
     clock.now_ms()
 }
 
+#[unsafe(export)]
 pub fn report(value: u64) uses (log: mut Log) {
     log.log_u64(value)
 }
 
+#[unsafe(export)]
 pub fn stop(code: u32) uses (host: mut Abort) {
     host.abort(code)
 }
 
+#[unsafe(export)]
+pub fn check_positive(value: i32) -> i32 {
+    assert!(value > 0, "must be positive")
+    value
+}
+
+#[unsafe(export)]
+pub fn echo_line() -> u32 uses (input: mut Stdin, out: mut Stdout) {
+    var reader = StdinReader::new()
+    var line = MemBuffer::empty()
+    if reader.read_line(mut line) {
+        println!(line)
+        line.len().downcast_unchecked()
+    } else {
+        0
+    }
+}
+
+#[unsafe(export)]
 pub fn file_size(name: HostText) -> Reply uses (files: mut Files) {
     match open(name.copy()) {
         Result::Ok(handle) => {
@@ -67,6 +98,33 @@ pub fn file_size(name: HostText) -> Reply uses (files: mut Files) {
     }
 }
 
+#[unsafe(export)]
+pub fn file_sum(name: HostText) -> Reply uses (files: mut Files) {
+    match open(name.copy()) {
+        Result::Ok(handle) => {
+            var buf = MemBuffer::empty()
+            buf.resize(16)
+            let outcome = match read(handle, 0, buf.span()) {
+                Result::Ok(count) => {
+                    var sum: u32 = 0
+                    var i: usize = 0
+                    let limit = count as usize
+                    while i < limit {
+                        sum += buf[i] as u32
+                        i += 1
+                    }
+                    Reply::ok(sum)
+                },
+                Result::Err(error) => Reply::error(error.code()),
+            }
+            close(handle)
+            outcome
+        },
+        Result::Err(error) => Reply::error(error.code()),
+    }
+}
+
+#[unsafe(export)]
 pub fn open_and_keep(name: HostText) -> Reply uses (files: mut Files) {
     match open(name.copy()) {
         Result::Ok(handle) => {

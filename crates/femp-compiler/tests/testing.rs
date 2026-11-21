@@ -65,6 +65,7 @@ fn runs_evm_tests() {
 #[test]
 #[cfg(any(
     all(target_arch = "x86_64", target_os = "linux"),
+    all(target_arch = "aarch64", target_os = "linux"),
     all(target_arch = "aarch64", target_os = "macos")
 ))]
 fn runs_native_tests() {
@@ -87,13 +88,12 @@ fn runs_wasm_tests() {
     let cases = results(Target::Wasm, None, Some(&node));
     assert_eq!(cases.len(), 3);
     assert!(find(&cases, "adds").passed);
+    assert!(find(&cases, "reverts_on_overflow").passed);
     let overflows = find(&cases, "overflows");
+    assert!(!overflows.passed);
     let message = overflows.message.as_deref().unwrap_or_default();
-    assert!(message.contains("trap: unreachable"), "{message}");
-    // `should_revert` has no meaning outside the EVM.
-    let reverts = find(&cases, "reverts_on_overflow");
-    let message = reverts.message.as_deref().unwrap_or_default();
-    assert!(message.contains("cannot build"), "{message}");
+    assert!(message.starts_with(OVERFLOW), "{message}");
+    assert!(message.contains("arithmetic overflow"), "{message}");
 }
 
 #[test]

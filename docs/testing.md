@@ -74,7 +74,7 @@ Shared tests across platforms
 core [wasm]
 
     FAIL  [0.0309s] counts_past_four_billion
-        wasm test failed: trap: unreachable (Fe code traps on a failed assertion, arithmetic overflow, division by zero and an index outside an array)
+        Test reverted: 0x4e487b710000000000000000000000000000000000000000000000000000000000000011 (arithmetic overflow)
 ```
 
 `usize` is 256 bits on the EVM, 64 natively and 32 in WebAssembly, so the addition overflows
@@ -84,15 +84,15 @@ divergence:
 - **Width-dependent types.** `usize` and `isize` differ per platform. Use fixed-width integers
   for values that cross a platform boundary or are stored.
 - **Conditional compilation.** `#[cfg(target = ..)]` variants that disagree on some input.
-- **Reverts.** A revert cannot be asserted on in WebAssembly, where a failure is a trap
-  without a reason, and `Result::unwrap` needs an error type that encodes as revert data.
 
 To search for divergences beyond the inputs your tests name, write a
 [differential](differential-testing.md).
 
 ## Writing portable tests
 
-- **Assert on returned values**, including `Result` errors, rather than on reverts.
+- **Assert on returned values**, including `Result` errors, or use `#[test(should_revert)]`,
+  which works on EVM, native and WebAssembly (`Result::unwrap` needs an error type that encodes
+  as revert data).
 - **Bind ports to fixed adapters.** A shared function that takes a `Clock` effect gets a fixed
   clock in its tests, so time-dependent logic is deterministic on every platform. See
   [ports and adapters](project-layout.md#ports-and-adapters).

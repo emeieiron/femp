@@ -40,11 +40,11 @@ impl Session {
         let db = &self.db;
         let ingot = self.ingot();
         let root = ingot.root_mod(db);
-        let exported: Vec<String> = mir::native_exports(db, root)
+        let exported: Vec<String> = mir::exported_funcs(db, root)
             .iter()
             .map(|func| {
                 format!(
-                    "Error: `#[unsafe(export)]` requires `--backend native`, but `{}` is exported",
+                    "Error: `#[unsafe(export)]` requires `--backend native` or `--backend wasm`, but `{}` is exported",
                     func.scope().pretty_path(db).unwrap_or_default()
                 )
             })

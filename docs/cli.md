@@ -76,12 +76,13 @@ platform. Every module that fails is reported with the compiler's diagnostics.
 ## femp build
 
 ```text
-femp build [-t <PLATFORM>]... [-O <LEVEL>]
+femp build [-t <PLATFORM>]... [-O <LEVEL>] [--wasm-stack-size <BYTES>]
 ```
 
 Compiles every platform module and writes its artifacts and bindings under
-`build/<platform>/<module>/`, printing each file with its kind. See
-[build outputs and bindings](bindings.md).
+`build/<platform>/<module>/`, printing each file with its kind. `--wasm-stack-size <BYTES>`
+overrides the WebAssembly linear-memory stack size (default 1 MiB, or `[platform.wasm]
+stack_size` in `femp.toml`) when `wasm` is built. See [build outputs and bindings](bindings.md).
 
 ## femp test
 
@@ -147,12 +148,12 @@ Fails when a claim is refuted or unknown, and with `--strict` when one is not su
 ## femp package
 
 ```text
-femp package [-t <PLATFORM>]... [-O <LEVEL>]
+femp package [-t <PLATFORM>]... [-O <LEVEL>] [--wasm-stack-size <BYTES>]
 ```
 
 Builds, then copies every platform's outputs under `dist/<platform>/` and writes
 `dist/manifest.json` with each file's kind and SHA-256. Native executables go under
-`dist/native/<arch>-<os>/`.
+`dist/native/<arch>-<os>/`. `--wasm-stack-size <BYTES>` passes through to the `wasm` build.
 
 ## femp clean
 

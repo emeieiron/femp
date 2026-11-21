@@ -85,8 +85,7 @@ femp prop
 
 ```text
 PASS  core::fee_never_exceeds_the_amount  256 cases on evm, native, wasm
-PASS  core::fee_spec                      256 cases on evm, native
-      not run on wasm: a WebAssembly module traps alike when a spec rejects a case and when it fails
+PASS  core::fee_spec                      256 cases on evm, native, wasm
 ```
 
 A failure is shrunk to a minimal counterexample, saved under `regressions/` and replayed on
@@ -137,8 +136,8 @@ output under `dist/` with SHA-256 hashes.
 
 ## Status
 
-- `evm` is stable. `native` and `wasm` use Fe 26.6's experimental backends; native executables
-  build on x86-64 Linux and Apple silicon.
+- `evm` is stable. `native` and `wasm` use Fe 26.7's experimental backends; native executables
+  build on x86-64 Linux, AArch64 Linux and Apple silicon.
 - Code the prover cannot model yet, such as strings, recursion and machines that deploy
   contracts, is reported as not supported. See [limits](docs/proving.md#limits).
 

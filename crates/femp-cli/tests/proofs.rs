@@ -280,10 +280,12 @@ pub fn doubled_spec(x: u64) -> u64 {
     );
     assert!(spec.contains("            x = 500\n"), "{spec}");
     assert!(
-        spec.contains("evm panicked (assertion failed) · native panicked (assertion failed)"),
+        spec.contains(
+            "evm panicked (assertion failed) · native panicked (assertion failed) · wasm panicked (assertion failed)"
+        ),
         "{spec}"
     );
-    assert!(spec.contains("not replayed on wasm"), "{spec}");
+    assert!(!spec.contains("not replayed on wasm"), "{spec}");
     assert!(
         spec.contains("saved to regressions/core/doubled_spec.json"),
         "{spec}"
@@ -293,7 +295,11 @@ pub fn doubled_spec(x: u64) -> u64 {
     let report = stdout(&tested);
     assert!(report.contains("fails on a stored regression"), "{report}");
     assert!(report.contains("      x = 500\n"), "{report}");
-    assert!(report.contains("not run on wasm"), "{report}");
+    assert!(!report.contains("not run on wasm"), "{report}");
+    assert!(
+        report.contains("wasm    panicked (assertion failed)"),
+        "{report}"
+    );
 }
 
 fn token_project() -> Option<tempfile::TempDir> {

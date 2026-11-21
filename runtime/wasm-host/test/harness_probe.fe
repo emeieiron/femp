@@ -1,58 +1,80 @@
 // A property harness in the shape FeMP generates, for the runner's tests.
-// `harness_probe.wasm` and `harness_probe.manifest.json` are built from it:
-//
-//   fe build --backend wasm --out-dir runtime/wasm-host/test runtime/wasm-host/test/harness_probe.fe
-use std::wasm::{HostText, Log}
-use std::wasm::files::{Files, Handle, close, open, read_byte}
+// `harness_probe.wasm` and `harness_probe.manifest.json` are built from it.
+use core::MemBuffer
+use core::text::{parse_int, parse_uint}
+use std::io::{Stdin, StdinReader, Stdout}
 
-pub fn femp_entry_0(femp_arg0: u64, femp_arg1: bool) -> bool {
-    femp_arg1 || femp_arg0 < 10
-}
-
-pub fn femp_entry_1(femp_arg0: i8) -> i8 {
-    0 - femp_arg0
-}
-
-fn femp_word(_ handle: Handle, _ index: u32) -> u64 uses (files: mut Files) {
-    var value: u64 = 0
-    var byte_index: u32 = 0
-    while byte_index < 8 {
-        match read_byte(handle, index * 8 + byte_index) {
-            Result::Ok(byte) => {
-                value = value | ((byte as u64) << ((byte_index * 8) as u64))
-            },
-            Result::Err(_) => core::panic(),
-        }
-        byte_index += 1
+fn femp_line(_ reader: mut StdinReader) -> Option<MemBuffer> uses (input: mut Stdin) {
+    var text = MemBuffer::empty()
+    if reader.read_line(mut text) {
+        Option::Some(text)
+    } else {
+        Option::None
     }
-    value
+}
+
+fn femp_uint(_ reader: mut StdinReader) -> u256 uses (input: mut Stdin) {
+    match femp_line(mut reader) {
+        Option::Some(text) => match parse_uint(text) {
+            Option::Some(value) => value,
+            Option::None => core::panic(),
+        },
+        Option::None => core::panic(),
+    }
+}
+
+fn femp_int(_ reader: mut StdinReader) -> i256 uses (input: mut Stdin) {
+    match femp_line(mut reader) {
+        Option::Some(text) => match parse_int(text) {
+            Option::Some(value) => value,
+            Option::None => core::panic(),
+        },
+        Option::None => core::panic(),
+    }
+}
+
+#[unsafe(export)]
+pub fn femp_entry_0() uses (input: mut Stdin, out: mut Stdout) {
+    var reader = StdinReader::new()
+    let femp_arg0: u64 = femp_uint(mut reader).downcast_unchecked()
+    let femp_arg1: bool = femp_uint(mut reader) == 1
+    println!(femp_arg1 || femp_arg0 < 10)
+}
+
+#[unsafe(export)]
+pub fn femp_entry_1() uses (input: mut Stdin, out: mut Stdout) {
+    var reader = StdinReader::new()
+    let femp_arg0: i8 = femp_int(mut reader).downcast_unchecked()
+    println!(0 - femp_arg0)
+}
+
+// Wide 256-bit arithmetic crossing the stream boundary.
+#[unsafe(export)]
+pub fn femp_entry_2() uses (input: mut Stdin, out: mut Stdout) {
+    var reader = StdinReader::new()
+    let femp_arg0: u256 = femp_uint(mut reader)
+    let femp_arg1: u256 = femp_uint(mut reader)
+    println!(femp_arg0 + femp_arg1)
 }
 
 // A counter that starts at its argument; command 0 adds, command 1 halves.
-pub fn femp_entry_2(script: HostText) -> u32 uses (files: mut Files, log: mut Log) {
-    let handle = match open(script.copy()) {
-        Result::Ok(handle) => handle,
-        Result::Err(_) => core::panic(),
-    }
-    var counter: u64 = femp_word(handle, 0)
-    log.log_i32(value: 0)
-    log.log_u64(value: counter)
-    let steps = femp_word(handle, 1)
-    var cursor: u32 = 2
-    var step: u64 = 0
+#[unsafe(export)]
+pub fn femp_entry_3() uses (input: mut Stdin, out: mut Stdout) {
+    var reader = StdinReader::new()
+    var counter: u256 = femp_uint(mut reader)
+    println!("@")
+    println!(counter)
+    let steps = femp_uint(mut reader)
+    var step: u256 = 0
     while step < steps {
-        let command = femp_word(handle, cursor)
-        cursor += 1
+        let command = femp_uint(mut reader)
         if command == 0 {
-            counter = counter + femp_word(handle, cursor)
-            cursor += 1
+            counter = counter + femp_uint(mut reader)
         } else {
             counter = counter / 2
         }
-        log.log_i32(value: 0)
-        log.log_u64(value: counter)
+        println!("@")
+        println!(counter)
         step += 1
     }
-    close(handle)
-    0
 }

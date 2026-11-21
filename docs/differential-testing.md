@@ -94,7 +94,7 @@ targets must agree:
 
 | Mode | Agreement |
 | --- | --- |
-| `normalized` | The default. Values must be equal. Panics agree unless both targets report a reason and the reasons differ, because WebAssembly traps carry none. |
+| `normalized` | The default. Values must be equal. Panics agree unless both targets report a reason and the reasons differ (a bare `core::panic()` trap in WebAssembly carries none). |
 | `strict` | Outcomes must be identical, reasons included. |
 | `lenient` | Values must be equal; any two abnormal outcomes agree. |
 

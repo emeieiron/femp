@@ -49,7 +49,7 @@ fn planted_failures_are_minimized_to_their_boundaries() {
         "{negation}"
     );
     assert!(
-        negation.contains("wasm    panicked (reason not reported)"),
+        negation.contains("wasm    panicked (arithmetic overflow)"),
         "{negation}"
     );
 
@@ -69,7 +69,7 @@ fn planted_failures_are_minimized_to_their_boundaries() {
 
     let stored = fs::read_to_string(project.path().join("regressions/core/rounding.json")).unwrap();
     assert!(stored.contains("\"value\": \"1000\""), "{stored}");
-    assert!(stored.contains("\"fe\": \"26.6.0\""), "{stored}");
+    assert!(stored.contains("\"fe\": \"26.7.0\""), "{stored}");
 }
 
 #[test]
@@ -272,5 +272,104 @@ fn contract_runs_find_bugs_that_need_their_values_to_meet() {
     assert!(
         vesting.contains("invariant `claims_stay_within_total` fails after step 1"),
         "{vesting}"
+    );
+}
+
+#[test]
+fn wide_integers_run_and_shrink_on_wasm() {
+    let Some(project) = common::project(PLANTED) else {
+        return;
+    };
+    fs::write(
+        project.path().join("shared/src/wide.fe"),
+        r#"use core::marker::Copy
+
+#[property(cases = 32)]
+pub fn wide_add_commutes(a: u256, b: i128) -> bool {
+    (a / 2) <= a && (b / 2) * 2 + (b % 2) == b
+}
+
+#[differential(cases = 32)]
+pub fn wide_echo(x: u256) -> u256 {
+    x
+}
+
+#[property(cases = 32)]
+#[gen(x = "18446744073709551615..=18446744073709551625")]
+pub fn wide_fits_u64(x: u256) -> bool {
+    x <= 18446744073709551615
+}
+
+#[machine(steps = "1..=4", runs = 12)]
+pub struct WideModel {
+    pub total: u256,
+    pub delta: i128,
+}
+
+impl Copy for WideModel {}
+
+impl WideModel {
+    #[init]
+    #[gen(start = "18446744073709551616..=18446744073709551700")]
+    pub fn start(start: u256) -> WideModel {
+        WideModel { total: start, delta: 0 }
+    }
+
+    #[command]
+    #[gen(step = "-1000..=1000")]
+    pub fn shift(self, step: i128) -> WideModel {
+        WideModel { total: self.total + 1, delta: self.delta + step }
+    }
+
+    #[invariant]
+    pub fn above_u64_max(self) -> bool {
+        self.total > 18446744073709551615
+    }
+
+    #[observe]
+    pub fn observe_total(self) -> u256 {
+        self.total
+    }
+
+    #[observe]
+    pub fn observe_delta(self) -> i128 {
+        self.delta
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = femp(
+        project.path(),
+        &["prop", "-f", "wide_", "--seed", "1", "--no-regressions"],
+    );
+    let report = stdout(&output);
+    assert!(!output.status.success(), "{report}");
+    assert!(
+        report.contains("PASS  core::wide_add_commutes  32 cases on evm, native, wasm"),
+        "{report}"
+    );
+    assert!(
+        report.contains("PASS  core::wide_echo          32 cases on evm, native, wasm"),
+        "{report}"
+    );
+    assert!(!report.contains("not run on wasm"), "{report}");
+
+    let fits = block(&report, "wide_fits_u64");
+    assert!(fits.contains("x = 18446744073709551616\n"), "{fits}");
+    assert!(fits.contains("evm     returned false"), "{fits}");
+    assert!(fits.contains("native  returned false"), "{fits}");
+    assert!(fits.contains("wasm    returned false"), "{fits}");
+
+    let machine = femp(
+        project.path(),
+        &["prop", "-f", "WideModel", "--seed", "1", "--no-regressions"],
+    );
+    let machine_report = stdout(&machine);
+    assert!(machine.status.success(), "{machine_report}");
+    assert!(
+        machine_report.contains("PASS  core::WideModel  12 runs on evm, native, wasm"),
+        "{machine_report}"
     );
 }

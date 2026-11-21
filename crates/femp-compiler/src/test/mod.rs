@@ -1,6 +1,6 @@
 //! Runs an ingot's `#[test]` functions on the session's target, as
 //! `fe test` does: on the EVM in an in-process interpreter, natively as one
-//! process per test, and in WebAssembly as one Node.js process per test.
+//! process per test, and in WebAssembly via Node.js.
 
 mod evm;
 mod native;

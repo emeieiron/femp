@@ -60,6 +60,10 @@ impl Platform for WasmPlatform {
         &[bindings::TYPESCRIPT]
     }
 
+    fn supports_stack_size(&self) -> bool {
+        true
+    }
+
     fn check(&self, _cx: &Context<'_>, module: &Module) -> Result<()> {
         femp_compiler::load(module, Target::Wasm).map(drop)
     }

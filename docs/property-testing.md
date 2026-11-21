@@ -159,17 +159,15 @@ not run, and a `#[reverts]` claim with parameters the message does not name is n
 ### Specs
 
 A public `#[spec]` function whose parameters and result are primitives runs as an entry point
-too. A case its `requires` rejects is discarded and counted (`256 cases (31 rejected)`); a
-failed `ensures` or any other panic fails it. A WebAssembly module traps alike when a spec
-rejects a case and when it fails, so specs run on the EVM and natively, and show as not run on
-`wasm`. See [proving](proving.md) for what specs state and how `femp prove` uses them.
+too, on every target (EVM, native and WebAssembly). A case its `requires` rejects is discarded
+and counted (`256 cases (31 rejected)`); a failed `ensures` or any other panic fails it. See
+[proving](proving.md) for what specs state and how `femp prove` uses them.
 
 ### Rules
 
 | | |
 | --- | --- |
 | Parameter and result types | `bool`, `u8`…`u256` and `i8`…`i256`. `usize` and `isize` are rejected because their width differs per backend. |
-| Wide types | Values wider than 64 bits cannot cross a WebAssembly export, so those entry points run on the EVM and natively and show as not run on `wasm`. |
 | Visibility | Entry points and machine methods must be `pub`. |
 | Shape | Entry points cannot be generic or conditionally compiled. |
 | Effects | Entry points in shared modules cannot declare effects. |
@@ -241,10 +239,10 @@ Every target's result is normalized before targets are compared:
 
 | Outcome | EVM | Native | WebAssembly |
 | --- | --- | --- | --- |
-| returned a value | the ABI word | the printed value | the export's result |
-| panicked (with a reason) | `Panic(uint256)` codes, `Error(string)`, or an empty revert | the `panicked: ...` line before the abort | — |
-| panicked (reason unknown) | — | — | an `unreachable` trap |
-| reverted | other revert data | — | — |
+| returned a value | the ABI word | the printed value | the printed value (`Stdout`) |
+| panicked (with a reason) | `Panic(uint256)` codes, `Error(string)`, or an empty revert | the `panicked: ...` line before the abort | `Panic(uint256)` codes, `Error(string)`, or an empty revert (`__fe_revert`), plus `abort()` on OOM |
+| panicked (reason unknown) | — | — | a bare `unreachable` trap (e.g. `core::panic()`) |
+| reverted | other revert data | — | other revert data |
 | aborted | — | — | `abort(code)` |
 | trapped | out of gas, other halts | a crash or a timeout | another trap or a timeout |
 
@@ -253,7 +251,7 @@ out of memory, an explicit panic, or a message.
 
 | Mode | Agreement |
 | --- | --- |
-| `normalized` | Values must be equal. Panics agree unless both report a reason and the reasons differ, because WebAssembly traps carry no reason. |
+| `normalized` | Values must be equal. Panics agree unless both report a reason and the reasons differ (a bare `core::panic()` trap in WebAssembly carries no reason). |
 | `strict` | Outcomes must be identical. |
 | `lenient` | Values must be equal; any two abnormal outcomes agree. |
 
@@ -329,7 +327,7 @@ ingot under `build/prop/<target>/<module>/`, compiles it with `fe`, and starts a
 | --- | --- | --- |
 | `evm` | A contract with one message per entry point. Machines keep their state in storage. | An embedded EVM (revm). Properties are calls whose effects are discarded; each machine run starts from the freshly deployed state. |
 | `native` | A `main` that reads requests from standard input and prints one value per line. | One long-lived process, restarted after a case aborts. |
-| `wasm` | One export per property. Per machine, an export that reads the whole sequence from a host file and logs each record. | `runtime/wasm-host/harness.mjs` in Node.js, through the same host runtime as the generated bindings. |
+| `wasm` | One `#[unsafe(export)]` function per property or machine that reads inputs from `Stdin` and writes values to `Stdout` (covering all widths up to 256 bits). | `runtime/wasm-host/harness.mjs` in Node.js, through the same host runtime as the generated bindings, restarting the instance after any failure. |
 
 The engine (`femp-prop`) only sees an executor interface. Generators, shrink passes and
 comparison strategies are each behind a trait or registry, and a new platform takes part by

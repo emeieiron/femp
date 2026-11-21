@@ -105,9 +105,9 @@ Make a spec `transparent` when callers rely on more than it states. A claim prov
 that is itself not proved is reported as unknown too.
 
 At run time, `requires`, `ensures` and `invariant` check what they state. A public spec of
-primitive parameters and result is also run by `femp prop`: a case its `requires` rejects is
-discarded, and a failed `ensures` or any panic fails it. WebAssembly traps alike when a spec
-rejects a case and when it fails, so specs run on the EVM and natively only.
+primitive parameters and result is also run by `femp prop` on every target (EVM, native and
+WebAssembly): a case its `requires` rejects is discarded, and a failed `ensures` or any panic
+fails it.
 
 ## Contracts
 

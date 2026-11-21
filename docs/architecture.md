@@ -100,14 +100,17 @@ JSON ABI and the contract metadata (ported from the compiler's command line, whi
 signatures derived from the ABI.
 
 **Native.** The ingot's root module compiled for the host, linked by `cc` into an executable
-named after the ingot. Available on x86-64 Linux and AArch64 macOS with a C compiler.
+named after the ingot. Available on x86-64 Linux, AArch64 Linux and AArch64 macOS with a C
+compiler.
 
 **WebAssembly.** The ingot's root module, with its dependencies, as one module, and the build
-manifest the compiler describes it with. The bindings are generated from the manifest. The wrapper
-imports `runtime/wasm-host/host.js`, a dependency-free implementation of Fe's WebAssembly host
-contract: it verifies the module against the manifest (versions, SHA-256, imports, exports),
-supplies the `env` imports (log, clock, abort, read-only files), places text arguments in the
-module's memory for the duration of a call, and converts values by their Fe types.
+manifest the compiler describes it with (with an optional configurable linear-memory stack
+size). The bindings are generated from the manifest. The wrapper imports
+`runtime/wasm-host/host.js`, a dependency-free implementation of Fe's WebAssembly host contract
+(version 3): it verifies the module against the manifest (versions, SHA-256, imports, exports),
+supplies the `env` imports (log, clock, abort, revert, read-only files, standard streams),
+places text arguments in the module's memory for the duration of a call, restarts the instance
+after a failed call, and converts values by their Fe types.
 
 ## Property testing
 
@@ -126,10 +129,11 @@ module's memory for the duration of a call, and converts values by their Fe type
 5. **Results** (`regress`, `report`): failures are written to `regressions/`, and the report is
    rendered as text or JSON.
 
-The harnesses differ per platform but share one shape. A property is a typed call. A machine
-run is a sequence executed from a fresh state that returns one record per step: on the EVM
-through transactions against storage, in one native process reading standard input, and in
-one WebAssembly call that reads the sequence from a host file.
+The harnesses differ per platform but share one shape. A property is a single call, and a
+machine run is a sequence executed from a fresh state that returns one record per step: on the
+EVM through transactions against storage, in one native process reading standard input, and in
+WebAssembly through `std::io::{Stdin, Stdout}` streams driven by `runtime/wasm-host/harness.mjs`
+(which handles every integer width up to 256 bits and exact revert/panic reasons).
 
 ## Proving
 
@@ -204,9 +208,11 @@ Moving to a new release means moving the Git tag of the compiler crates in the w
 manifest, the two constants in `femp-compiler`, and `DEFAULT_FE_VERSION`, which a test keeps
 equal to the linked version.
 
-Tests run as the compiler's own runner runs them: EVM tests in the compiler's in-process EVM,
-native tests as one process per test of an executable linked with a small C launcher, and
-WebAssembly tests as one Node.js process per test module, instantiated with femp's host runtime.
+Tests run as the compiler's own runner runs them: EVM tests in a single compiled suite contract
+deployed once and snapshot-forked per test in the compiler's in-process EVM, native tests as one
+process per test of an executable linked with a small C launcher, and WebAssembly tests as a
+batched test module run in Node.js with femp's host runtime (supporting `#[test(should_revert)]`
+and decoded revert reasons).
 
 `femp-host` finds Node.js and Z3 the same way: `FEMP_NODE` or `FEMP_Z3`, then a copy under
 `FEMP_HOME` (default `~/.femp`), then the program on `PATH`, skipping any that does not run. A

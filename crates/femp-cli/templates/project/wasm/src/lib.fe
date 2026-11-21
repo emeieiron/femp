@@ -1,4 +1,5 @@
-/// Every public function in this file is exported to JavaScript.
+/// Functions marked `#[unsafe(export)]` are exported to JavaScript.
+#[unsafe(export)]
 pub fn fee(amount: u64, rate: u64) -> u64 {
     {{ident}}_core::fee(amount, rate)
 }

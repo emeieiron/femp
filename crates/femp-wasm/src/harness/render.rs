@@ -1,49 +1,40 @@
-//! Renders the WebAssembly harness: one export per property, and per
-//! machine an export that runs a whole sequence read from a host file and
-//! logs each record. Entry points whose types do not fit the module
-//! boundary get no export.
+//! Renders the WebAssembly property harness: one `#[unsafe(export)]` function
+//! per property and per pure machine, reading decimal arguments from
+//! `std::io::Stdin` and printing results to `std::io::Stdout` so values of any
+//! width (including `u128`, `i128`, `u256`, and `i256`) cross the boundary.
 
 use femp_core::codegen::fe::{self, SourceWriter};
 use femp_core::property::{Machine, Method, Param, Property, Suite, Ty};
 use serde_json::{Value as Json, json};
 
-/// Every type a WebAssembly export or a 64-bit host word can carry.
-pub fn fits(ty: Ty) -> bool {
-    ty.bits() <= 64
-}
-
-pub fn property_fits(property: &Property) -> bool {
-    fits(property.result) && property.params.iter().all(|param| fits(param.ty))
-}
-
 pub fn machine_fits(machine: &Machine) -> bool {
     !machine.uses_effects()
-        && machine
-            .methods()
-            .all(|method| method.params.iter().all(|param| fits(param.ty)))
-        && machine
-            .observations
-            .iter()
-            .all(|observation| fits(observation.ty))
 }
 
 pub fn export_name(id: usize) -> String {
     format!("femp_entry_{id}")
 }
 
+const READS: &str = "uses (input: mut Stdin)";
+const READS_AND_PRINTS: &str = "uses (input: mut Stdin, out: mut Stdout)";
+
 pub fn render(suite: &Suite) -> String {
     let mut out = fe::writer();
     out.line(fe::HEADER);
-    if !suite.machines.is_empty() {
-        out.line("use std::wasm::{HostText, Log}");
-        out.line("use std::wasm::files::{Files, Handle, close, open, read_byte}");
-        out.blank();
-        helpers(&mut out);
+    let has_entries =
+        !suite.properties.is_empty() || suite.machines.iter().any(machine_fits);
+    if !has_entries {
+        out.line("#[unsafe(export)]");
+        out.line("pub fn femp_noop() {}");
+        return out.finish();
     }
+    out.line("use core::MemBuffer");
+    out.line("use core::text::{parse_int, parse_uint}");
+    out.line("use std::io::{Stdin, StdinReader, Stdout}");
+    out.blank();
+    readers(&mut out);
     for (index, property) in suite.properties.iter().enumerate() {
-        if property_fits(property) {
-            render_property(&mut out, suite, suite.property_id(index), property);
-        }
+        render_property(&mut out, suite, suite.property_id(index), property);
     }
     for (index, machine) in suite.machines.iter().enumerate() {
         if machine_fits(machine) {
@@ -55,21 +46,13 @@ pub fn render(suite: &Suite) -> String {
 
 /// The runner's table of entry points, in id order.
 pub fn entries(suite: &Suite) -> Json {
-    let properties = suite
-        .properties
-        .iter()
-        .enumerate()
-        .map(|(index, property)| {
-            if property_fits(property) {
-                json!({
-                    "kind": "property",
-                    "export": export_name(suite.property_id(index)),
-                    "params": property.params.len(),
-                })
-            } else {
-                json!({ "kind": "unsupported" })
-            }
-        });
+    let properties = suite.properties.iter().enumerate().map(|(index, property)| {
+        json!({
+            "kind": "property",
+            "export": export_name(suite.property_id(index)),
+            "params": property.params.len(),
+        })
+    });
     let machines = suite.machines.iter().enumerate().map(|(index, machine)| {
         if machine_fits(machine) {
             json!({
@@ -89,108 +72,56 @@ pub fn entries(suite: &Suite) -> Json {
     Json::Array(properties.chain(machines).collect())
 }
 
-fn helpers(out: &mut SourceWriter) {
+fn readers(out: &mut SourceWriter) {
     out.block(
-        "fn femp_word(_ handle: Handle, _ index: u32) -> u64 uses (files: mut Files) {",
+        format!("fn femp_line(_ reader: mut StdinReader) -> Option<MemBuffer> {READS} {{"),
         "}",
         |out| {
-            out.line("var value: u64 = 0");
-            out.line("var byte_index: u32 = 0");
-            out.block("while byte_index < 8 {", "}", |out| {
-                out.block(
-                    "match read_byte(handle, index * 8 + byte_index) {",
-                    "}",
-                    |out| {
-                        out.block("Result::Ok(byte) => {", "},", |out| {
-                            out.line(
-                                "value = value | ((byte as u64) << ((byte_index * 8) as u64))",
-                            );
-                        });
-                        out.line("Result::Err(_) => core::panic(),");
-                    },
-                );
-                out.line("byte_index += 1");
+            out.line("var text = MemBuffer::empty()");
+            out.line("if reader.read_line(mut text) {");
+            out.indented(|out| {
+                out.line("Option::Some(text)");
             });
-            out.line("value");
+            out.line("} else {");
+            out.indented(|out| {
+                out.line("Option::None");
+            });
+            out.line("}");
         },
     );
     out.blank();
-    // Signed values cross as their 64-bit two's-complement pattern.
-    out.block("fn femp_signed(_ word: u64) -> i64 {", "}", |out| {
-        out.line("if word > 9223372036854775807 {");
-        out.indented(|out| {
-            out.line("let wide: i128 = (word as i128) - 18446744073709551616");
-            out.line("wide.downcast_unchecked()");
-        });
-        out.line("} else {");
-        out.indented(|out| {
-            out.line("word.downcast_unchecked()");
-        });
-        out.line("}");
-    });
-    out.blank();
-    out.block("fn femp_bits(_ value: i64) -> u64 {", "}", |out| {
-        out.line("if value < 0 {");
-        out.indented(|out| {
-            out.line("let wide: i128 = (value as i128) + 18446744073709551616");
-            out.line("wide.downcast_unchecked()");
-        });
-        out.line("} else {");
-        out.indented(|out| {
-            out.line("value.downcast_unchecked()");
-        });
-        out.line("}");
-    });
-    out.blank();
-}
-
-fn params(params: &[Param], locals: &[String]) -> String {
-    params
-        .iter()
-        .zip(locals)
-        .map(|(param, local)| format!("{local}: {}", fe::type_name(param.ty)))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn render_property(out: &mut SourceWriter, suite: &Suite, id: usize, property: &Property) {
-    let locals = fe::locals(property.params.len());
-    out.block(
-        format!(
-            "pub fn {}({}) -> {} {{",
-            export_name(id),
-            params(&property.params, &locals),
-            fe::type_name(property.result)
-        ),
-        "}",
-        |out| {
-            out.line(format!(
-                "{}({})",
-                suite.item_path(&property.path, &property.name),
-                fe::arguments(&property.params, &locals)
-            ));
-        },
-    );
-    out.blank();
-}
-
-fn from_word(ty: Ty, word: &str) -> String {
-    match ty {
-        Ty::Bool => format!("{word} == 1"),
-        Ty::Uint(64) => word.to_string(),
-        Ty::Uint(_) => format!("{word}.downcast_unchecked()"),
-        Ty::Int(64) => format!("femp_signed({word})"),
-        Ty::Int(_) => format!("femp_signed({word}).downcast_unchecked()"),
+    for (name, parse, ty) in [
+        ("femp_uint", "parse_uint", "u256"),
+        ("femp_int", "parse_int", "i256"),
+    ] {
+        out.block(
+            format!("fn {name}(_ reader: mut StdinReader) -> {ty} {READS} {{"),
+            "}",
+            |out| {
+                out.block("match femp_line(mut reader) {", "}", |out| {
+                    out.block(
+                        format!("Option::Some(text) => match {parse}(text) {{"),
+                        "},",
+                        |out| {
+                            out.line("Option::Some(value) => value,");
+                            out.line("Option::None => core::panic(),");
+                        },
+                    );
+                    out.line("Option::None => core::panic(),");
+                });
+            },
+        );
+        out.blank();
     }
 }
 
-fn to_word(ty: Ty, value: &str) -> String {
+fn read(ty: Ty) -> String {
     match ty {
-        Ty::Bool => format!("if {value} {{ 1 }} else {{ 0 }}"),
-        Ty::Uint(64) => value.to_string(),
-        Ty::Uint(_) => format!("{value} as u64"),
-        Ty::Int(64) => format!("femp_bits({value})"),
-        Ty::Int(_) => format!("femp_bits({value} as i64)"),
+        Ty::Bool => "femp_uint(mut reader) == 1".to_string(),
+        Ty::Uint(256) => "femp_uint(mut reader)".to_string(),
+        Ty::Int(256) => "femp_int(mut reader)".to_string(),
+        Ty::Uint(_) => "femp_uint(mut reader).downcast_unchecked()".to_string(),
+        Ty::Int(_) => "femp_int(mut reader).downcast_unchecked()".to_string(),
     }
 }
 
@@ -200,9 +131,8 @@ fn read_args(out: &mut SourceWriter, params: &[Param]) -> Vec<String> {
         out.line(format!(
             "let {local}: {} = {}",
             fe::type_name(param.ty),
-            from_word(param.ty, "femp_word(handle, cursor)")
+            read(param.ty)
         ));
-        out.line("cursor += 1");
     }
     locals
 }
@@ -215,40 +145,46 @@ fn call(method: &Method, locals: &[String]) -> String {
     )
 }
 
+fn render_property(out: &mut SourceWriter, suite: &Suite, id: usize, property: &Property) {
+    out.line("#[unsafe(export)]");
+    out.block(
+        format!("pub fn {}() {READS_AND_PRINTS} {{", export_name(id)),
+        "}",
+        |out| {
+            out.line("var reader = StdinReader::new()");
+            let locals = read_args(out, &property.params);
+            let target = suite.item_path(&property.path, &property.name);
+            out.line(format!(
+                "println!({target}({}))",
+                fe::arguments(&property.params, &locals)
+            ));
+        },
+    );
+    out.blank();
+}
+
 fn render_machine(out: &mut SourceWriter, suite: &Suite, id: usize, machine: &Machine) {
     let ty = suite.item_path(&machine.path, &machine.name);
     out.block(
-        format!("fn femp_record_{id}(_ machine: {ty}) uses (log: mut Log) {{"),
+        format!("fn femp_record_{id}(_ machine: {ty}) uses (out: mut Stdout) {{"),
         "}",
         |out| {
-            out.line("log.log_i32(value: 0)");
+            out.line("println!(\"@\")");
             for invariant in &machine.invariants {
-                out.line(format!(
-                    "log.log_u64(value: {})",
-                    to_word(Ty::Bool, &call(invariant, &[]))
-                ));
+                out.line(format!("println!({})", call(invariant, &[])));
             }
             for observation in &machine.observations {
-                out.line(format!(
-                    "log.log_u64(value: {})",
-                    to_word(observation.ty, &call(&observation.method, &[]))
-                ));
+                out.line(format!("println!({})", call(&observation.method, &[])));
             }
         },
     );
     out.blank();
+    out.line("#[unsafe(export)]");
     out.block(
-        format!(
-            "pub fn {}(script: HostText) -> u32 uses (files: mut Files, log: mut Log) {{",
-            export_name(id)
-        ),
+        format!("pub fn {}() {READS_AND_PRINTS} {{", export_name(id)),
         "}",
         |out| {
-            out.block("let handle = match open(script.copy()) {", "}", |out| {
-                out.line("Result::Ok(handle) => handle,");
-                out.line("Result::Err(_) => core::panic(),");
-            });
-            out.line("var cursor: u32 = 0");
+            out.line("var reader = StdinReader::new()");
             let locals = read_args(out, &machine.init.params);
             out.line(format!(
                 "var machine = {ty}::{}({})",
@@ -256,12 +192,10 @@ fn render_machine(out: &mut SourceWriter, suite: &Suite, id: usize, machine: &Ma
                 fe::arguments(&machine.init.params, &locals)
             ));
             out.line(format!("femp_record_{id}(machine)"));
-            out.line("let steps = femp_word(handle, cursor)");
-            out.line("cursor += 1");
-            out.line("var step: u64 = 0");
+            out.line("let steps = femp_uint(mut reader)");
+            out.line("var step: u256 = 0");
             out.block("while step < steps {", "}", |out| {
-                out.line("let command = femp_word(handle, cursor)");
-                out.line("cursor += 1");
+                out.line("let command = femp_uint(mut reader)");
                 for (index, command) in machine.commands.iter().enumerate() {
                     out.line(if index == 0 {
                         format!("if command == {index} {{")
@@ -281,8 +215,6 @@ fn render_machine(out: &mut SourceWriter, suite: &Suite, id: usize, machine: &Ma
                 out.line(format!("femp_record_{id}(machine)"));
                 out.line("step += 1");
             });
-            out.line("close(handle)");
-            out.line("0");
         },
     );
     out.blank();
@@ -316,11 +248,9 @@ mod tests {
     }
 
     #[test]
-    fn wide_types_get_no_export() {
+    fn wide_types_are_exported() {
         let suite = fixtures::suite();
-        assert!(property_fits(&suite.properties[0]));
-        assert!(!property_fits(&suite.properties[2]));
         assert!(machine_fits(&suite.machines[0]));
-        assert!(!render(&suite).contains("femp_entry_2"));
+        assert!(render(&suite).contains("pub fn femp_entry_2()"));
     }
 }

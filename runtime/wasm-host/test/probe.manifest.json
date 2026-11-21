@@ -2,14 +2,23 @@
   "manifest_version": 1,
   "module": {
     "file": "probe.wasm",
-    "sha256": "d20bbdd6a0139bafced0ae4e2ad79902a16ff77c2c6913f0239d3e85e2ec6b76",
-    "size": 8030,
+    "sha256": "7cb538dc323dd4480f79b3cf0a27ab689e11927b64d75ef57bef95c520410e70",
+    "size": 10916,
     "initial_memory_pages": 18
   },
-  "contract_version": 1,
+  "contract_version": 3,
   "optimization": "1",
-  "compiler": "fe 26.6.0 (5b3f96a)",
+  "compiler": "fe 26.7.0 (e6e6342)",
   "imports": [
+    {
+      "module": "env",
+      "name": "__fe_revert",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32"],
+        "results": []
+      }
+    },
     {
       "module": "env",
       "name": "sys_wasm_abort",
@@ -39,6 +48,15 @@
     },
     {
       "module": "env",
+      "name": "sys_wasm_files_read",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32", "i32", "i32"],
+        "results": ["i64"]
+      }
+    },
+    {
+      "module": "env",
       "name": "sys_wasm_files_size",
       "kind": "function",
       "type": {
@@ -62,6 +80,24 @@
       "type": {
         "params": [],
         "results": ["i64"]
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_stream_read",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32", "i32"],
+        "results": ["i32"]
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_stream_write",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32", "i32"],
+        "results": ["i32"]
       }
     }
   ],
@@ -126,6 +162,21 @@
       "result": null
     },
     {
+      "name": "check_positive",
+      "kind": "function",
+      "params": [
+        {
+          "name": "value",
+          "type": "i32",
+          "wasm": ["i32"]
+        }
+      ],
+      "result": {
+        "type": "i32",
+        "wasm": ["i32"]
+      }
+    },
+    {
       "name": "double_up_to_100",
       "kind": "function",
       "params": [
@@ -141,7 +192,31 @@
       }
     },
     {
+      "name": "echo_line",
+      "kind": "function",
+      "params": [],
+      "result": {
+        "type": "u32",
+        "wasm": ["i32"]
+      }
+    },
+    {
       "name": "file_size",
+      "kind": "function",
+      "params": [
+        {
+          "name": "name",
+          "type": "HostText",
+          "wasm": ["i32", "i32"]
+        }
+      ],
+      "result": {
+        "type": "Reply",
+        "wasm": ["i64"]
+      }
+    },
+    {
+      "name": "file_sum",
       "kind": "function",
       "params": [
         {

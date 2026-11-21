@@ -1,10 +1,12 @@
-//! EVM tests: each test is a contract, deployed and called once in an
-//! in-process EVM.
+//! EVM tests: every selected test of an ingot is compiled into one contract,
+//! deployed once, and called with its 4-byte selector in an isolated instance
+//! of that deployment.
 
 use std::time::Instant;
 
 use codegen::{SonatinaTestOptions, TestMetadata};
-use contract_harness::{ExecutionOptions, HarnessError, RuntimeInstance, U256};
+use contract_harness::{ExecutionOptions, HarnessError, RuntimeInstance, RuntimeSnapshot, U256};
+use hir::hir_def::HirIngot;
 
 use super::{Outcome, TestOptions, failed, passed, revert_mismatch};
 use crate::error::CompileError;
@@ -16,46 +18,35 @@ pub(super) fn run(
     options: &TestOptions<'_>,
 ) -> Result<Vec<Outcome>, CompileError> {
     let db = &session.db;
-    let ingot = session.ingot();
+    let mut top_mods = session.ingot().all_modules(db).to_vec();
+    top_mods.sort_by(|left, right| left.name(db).cmp(&right.name(db)));
     let level = opt_level(options.optimize);
-    let output = generate("Sonatina", || {
-        codegen::emit_test_ingot_sonatina(
+    let suite = generate("Sonatina", || {
+        codegen::emit_test_suite_sonatina(
             db,
-            ingot,
+            &top_mods,
             level,
             SonatinaTestOptions::default(),
             options.filter,
         )
     })?;
-    Ok(output
+    let Some(suite) = suite else {
+        return Ok(Vec::new());
+    };
+    let deployed = RuntimeInstance::deploy(&hex::encode(&suite.bytecode))
+        .map_err(|error| CompileError::Failed(format!("Failed to deploy the test suite: {error}")))?
+        .snapshot();
+    Ok(suite
         .tests
         .iter()
-        .filter(|case| matches(case, options.filter))
-        .map(run_case)
+        .map(|case| run_case(&deployed, case))
         .collect())
 }
 
-fn matches(case: &TestMetadata, filter: Option<&str>) -> bool {
-    filter.is_none_or(|pattern| {
-        case.hir_name.contains(pattern)
-            || case.symbol_name.contains(pattern)
-            || case.display_name.contains(pattern)
-    })
-}
-
-fn run_case(case: &TestMetadata) -> Outcome {
+fn run_case(deployed: &RuntimeSnapshot, case: &TestMetadata) -> Outcome {
     let started = Instant::now();
-    let name = case.display_name.as_str();
+    let name = case.name.as_str();
     let fail = |message: String| failed(name, message, started.elapsed());
-    if case.value_param_count > 0 {
-        return fail(format!(
-            "tests with value parameters are not supported (found {})",
-            case.value_param_count
-        ));
-    }
-    if case.object_name.trim().is_empty() {
-        return fail(format!("missing test object name for `{name}`"));
-    }
     let balance = match case.initial_balance.as_deref().map(balance).transpose() {
         Ok(balance) => balance,
         Err(error) => {
@@ -64,19 +55,13 @@ fn run_case(case: &TestMetadata) -> Outcome {
             ));
         }
     };
-    if case.bytecode.is_empty() {
-        return fail(format!("missing test bytecode for `{name}`"));
-    }
-    let mut instance = match RuntimeInstance::deploy_tracked(&hex::encode(&case.bytecode)) {
-        Ok((instance, _)) => instance,
-        Err(error) => return fail(format!("Failed to deploy test: {error}")),
-    };
+    let mut instance = deployed.instance();
     if let Some(balance) = balance {
         instance.fund_contract(balance);
     }
-    // Test functions take no arguments, so the call carries no data.
+    let calldata = case.selector.to_be_bytes();
     let called = instance
-        .call_raw(&[], ExecutionOptions::default())
+        .call_raw(&calldata, ExecutionOptions::default())
         .map(drop);
     let message = match (called, &case.expected_revert) {
         (Ok(()), None) => None,

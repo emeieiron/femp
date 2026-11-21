@@ -15,7 +15,11 @@ use femp_core::property::{Executor, HarnessRequest};
 pub use build::EXECUTABLE;
 
 pub const ID: &str = "native";
-const SUPPORTED_HOSTS: &[(&str, &str)] = &[("linux", "x86_64"), ("macos", "aarch64")];
+const SUPPORTED_HOSTS: &[(&str, &str)] = &[
+    ("linux", "x86_64"),
+    ("linux", "aarch64"),
+    ("macos", "aarch64"),
+];
 
 pub struct NativePlatform {
     id: PlatformId,
@@ -52,7 +56,7 @@ impl Platform for NativePlatform {
         if !host_is_supported(&environment.host) {
             return Capability::Unavailable {
                 reason: format!(
-                    "native executables can only be built on x86-64 Linux and AArch64 macOS; \
+                    "native executables can only be built on x86-64 Linux, AArch64 Linux, and AArch64 macOS; \
                      this host is {} {}",
                     environment.host.arch, environment.host.os
                 ),
@@ -156,6 +160,11 @@ mod tests {
         assert!(
             platform
                 .capability(&environment("linux", "x86_64", true))
+                .is_available()
+        );
+        assert!(
+            platform
+                .capability(&environment("linux", "aarch64", true))
                 .is_available()
         );
     }

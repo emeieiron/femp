@@ -9,7 +9,7 @@ use crate::ingot::SOURCE_DIR;
 use crate::naming::is_valid_name;
 
 pub const MANIFEST_FILE: &str = "femp.toml";
-pub const DEFAULT_FE_VERSION: &str = "26.6.0";
+pub const DEFAULT_FE_VERSION: &str = "26.7.0";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,6 +72,8 @@ pub struct GeneratorSection {
 pub struct PlatformSection {
     /// Absent means "every binding kind the platform offers".
     pub bindings: Option<Vec<String>>,
+    /// Stack size in bytes for platforms that support configuring it (WebAssembly, default 1 MiB).
+    pub stack_size: Option<u32>,
 }
 
 impl Manifest {
@@ -138,6 +140,14 @@ impl Manifest {
                 }
             }
         }
+        for (platform, section) in &self.platforms {
+            if section.stack_size == Some(0) {
+                return Err(Error::invalid_manifest(
+                    path,
+                    format!("platform.{platform}.stack_size must be at least 1 byte"),
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -161,7 +171,7 @@ mod tests {
             version = "0.1.0"
 
             [toolchain]
-            fe = "26.6.0"
+            fe = "26.7.0"
 
             [modules.core]
             path = "shared"
@@ -172,6 +182,7 @@ mod tests {
 
             [platform.wasm]
             bindings = ["typescript"]
+            stack_size = 2097152
             "#,
         )
         .unwrap();
@@ -183,6 +194,27 @@ mod tests {
             manifest.platforms["wasm"].bindings.as_deref(),
             Some(&["typescript".to_string()][..])
         );
+        assert_eq!(manifest.platforms["wasm"].stack_size, Some(2_097_152));
+    }
+
+    #[test]
+    fn rejects_zero_stack_size() {
+        let error = parse(
+            r#"
+            [project]
+            name = "demo"
+            version = "0.1.0"
+
+            [modules.core]
+            path = "shared"
+
+            [platform.wasm]
+            stack_size = 0
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("stack_size"), "{error}");
     }
 
     #[test]

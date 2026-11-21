@@ -191,7 +191,7 @@ fn config(seed: u64) -> Config {
         shrink: true,
         max_shrinks: DEFAULT_MAX_SHRINKS,
         regressions: true,
-        fe_version: "26.6.0".into(),
+        fe_version: "26.7.0".into(),
         optimize: vec!["1".into()],
     }
 }

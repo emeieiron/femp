@@ -14,10 +14,10 @@ use femp_vir::{
     Terminator, Type, UnOp, ValueId,
 };
 use hir::analysis::semantic::{
-    BinaryOp, FailReason, NBlockId, NDataProjection, NEffectArg, NEffectArgValue, NExpr, NIndex,
-    NOperand, NPlace, NPlaceBase, NRootId, NRootKind, NStatement, NStatementKind, NSuccessor,
-    NTerminatorKind, NValueDefinition, NValueId, NormalizedBody, Overflow, SemanticInstance,
-    UnaryOp, normalize_semantic_body,
+    BinaryOp, FailReason, NBlockId, NDataProjection, NEffectArg, NExpr, NIndex, NOperand, NPlace,
+    NPlaceBase, NRootId, NRootKind, NStatement, NStatementKind, NSuccessor, NTerminatorKind,
+    NValueDefinition, NValueId, NormalizedBody, Overflow, SemanticInstance, UnaryOp,
+    normalize_semantic_body,
 };
 use hir::analysis::ty::ty_check::BodyOwner;
 use hir::analysis::ty::ty_def::BorrowKind;
@@ -1093,14 +1093,9 @@ impl<'db> BodyLowering<'_, 'db> {
                     .ok_or_else(|| {
                         self.unsupported(&span, format!("a call to `{name}` without its effects"))
                     })?;
-                let value = match &passed.arg {
-                    NEffectArgValue::Value(operand) => self.operand(operand)?,
-                    NEffectArgValue::Place(place) => {
-                        let ty = self.ty(place.ty, &span)?;
-                        let expr = self.read(place, &span)?;
-                        self.fresh(ty, expr, span.clone())
-                    }
-                };
+                let ty = self.ty(passed.place.ty, &span)?;
+                let expr = self.read(&passed.place, &span)?;
+                let value = self.fresh(ty, expr, span.clone());
                 args.push(value);
             }
         }

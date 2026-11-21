@@ -8,8 +8,9 @@
 //! A property answers with its result on one line. A machine answers with
 //! one record per state, the initial one included: a `@` line, then each
 //! invariant and observation on its own line. A line starting with `!`
-//! reports an abnormal end (`!abort <code>`, `!trap <message>`,
-//! `!error <message>`); a process that dies instead reports it on stderr.
+//! reports an abnormal end (`!revert <hex>`, `!oom`, `!abort <code>`,
+//! `!trap <message>`, `!error <message>`); a process that dies instead reports
+//! it on stderr.
 
 use femp_core::property::{
     Halt, Machine, Outcome, PanicKind, Record, Sequence, StepStatus, Trace, Trap, Ty, Value,
@@ -59,6 +60,11 @@ pub fn status(line: &str) -> Outcome {
     let body = line.trim_start_matches(STATUS);
     let (kind, detail) = body.split_once(' ').unwrap_or((body, ""));
     match kind {
+        "revert" => match decode_hex(detail) {
+            Some(data) => Outcome::from_revert(&data),
+            None => Outcome::Trapped(Trap::Crashed(format!("malformed status `{line}`"))),
+        },
+        "oom" => Outcome::Panicked(PanicKind::Memory),
         "abort" => match detail.trim().parse() {
             Ok(code) => Outcome::Aborted(code),
             Err(_) => Outcome::Trapped(Trap::Crashed(format!("malformed status `{line}`"))),
@@ -67,6 +73,17 @@ pub fn status(line: &str) -> Outcome {
         "trap" => Outcome::Trapped(Trap::Halted(detail.to_string())),
         _ => Outcome::Trapped(Trap::Crashed(detail.to_string())),
     }
+}
+
+fn decode_hex(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim();
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(text.get(index..index + 2)?, 16).ok())
+        .collect()
 }
 
 /// Reads a value line. Signed values may also arrive as the 64-bit pattern
@@ -284,6 +301,12 @@ mod tests {
             Some(value(Ty::Int(8), "-1"))
         );
         assert_eq!(decode_value(Ty::Bool, "true"), Some(Value::boolean(true)));
+        assert_eq!(
+            status("!revert 4e487b710000000000000000000000000000000000000000000000000000000000000011"),
+            Outcome::Panicked(PanicKind::Overflow)
+        );
+        assert_eq!(status("!revert "), Outcome::Panicked(PanicKind::Explicit));
+        assert_eq!(status("!oom"), Outcome::Panicked(PanicKind::Memory));
         assert_eq!(status("!abort 6"), Outcome::Aborted(6));
         assert_eq!(
             status("!trap RuntimeError: unreachable"),

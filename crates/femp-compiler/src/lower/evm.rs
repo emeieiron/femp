@@ -78,10 +78,11 @@ const CALLS: [(&str, bool, bool); 11] = [
     ("evm::effects::Call::try_static", false, false),
 ];
 
-const DELEGATES: [&str; 3] = [
+const DELEGATES: [&str; 4] = [
     "evm::effects::Call::delegate",
     "evm::effects::Call::try_delegate",
     "evm::effects::Call::raw_delegatecall",
+    "evm::effects::Call::forward_delegatecall",
 ];
 
 pub fn model(db: &DriverDataBase, func: Func<'_>) -> Option<Model> {

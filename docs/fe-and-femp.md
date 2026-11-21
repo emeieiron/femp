@@ -1,7 +1,7 @@
 # FeMP and the Fe toolchain
 
 FeMP is built on the official Fe compiler, not beside it. `femp` links the compiler's own
-crates at one release (26.6.0) and calls them for every check, build and test, so the two
+crates at one release (26.7.0) and calls them for every check, build and test, so the two
 never disagree about the language: a contract `femp build` writes is byte for byte what
 `fe build` writes. What FeMP adds is a level above the compiler: a project that spans several
 targets, and tools that check those targets against each other and against stated claims.
@@ -13,9 +13,9 @@ targets, and tools that check those targets against each other and against state
 | **Unit of work** | An ingot, or a workspace whose members share one target | A project of modules for several platforms, with shared ingots compiled into each |
 | **EVM contracts** | `fe build`: bytecode, runtime bytecode, ABI, metadata | The same files, plus a TypeScript module with the typed ABI and bytecode |
 | **Native programs** | `fe build --backend native`: executables, and objects and static libraries of exported functions | Executables |
-| **WebAssembly** | The `fe` release is built without its `wasm` feature, so it rejects `target = "wasm"` | Modules with a build manifest, JavaScript and TypeScript bindings and a host runtime |
+| **WebAssembly** | `fe build --backend wasm`: `.wasm` module and build manifest | The same files, plus JavaScript and TypeScript bindings, a host runtime and an npm `package.json` |
 | **Type checking** | `fe check`, once per ingot for its target | `femp check`: every shared module once per platform, and layering rules that keep platform-only capabilities out of shared code |
-| **Unit tests** | `fe test` on the EVM (Sonatina) or natively, per ingot | `femp test`: each shared test on the EVM, natively and in WebAssembly, side by side; a divergence fails the run |
+| **Unit tests** | `fe test` on the EVM (Sonatina), natively or in WebAssembly, per ingot | `femp test`: each shared test on the EVM, natively and in WebAssembly, side by side; a divergence fails the run |
 | **Property testing** | – | `femp prop`: generated inputs, shrinking to a minimal counterexample, stored regressions |
 | **Differential testing** | – | Every target, and every optimization level with `-O`, must compute the same outcome |
 | **State machines** | – | `#[machine]` sequences, including machines that deploy and drive the project's contracts |
@@ -34,10 +34,11 @@ targets, and tools that check those targets against each other and against state
   preprocessing beyond the source generators you declare. Its attributes, such as
   `#[property]`, are ones the compiler accepts and ignores, and the `femp_spec` statements are
   ordinary functions that check at run time what they state.
-- **Tests.** `femp test` runs `#[test]` functions as `fe test` does, in the compiler's
-  in-process EVM and as native executables, and adds WebAssembly through Node.js.
-- **Project files.** Every FeMP module is an ingot with its own `fe.toml`. Shared, EVM and
-  native modules build with `fe` as they are.
+- **Tests.** `femp test` runs `#[test]` functions as `fe test` does — in the compiler's
+  in-process EVM, as native executables and in WebAssembly through Node.js — and compares shared
+  tests across all three.
+- **Project files.** Every FeMP module is an ingot with its own `fe.toml`. Shared, EVM, native
+  and WebAssembly modules build with `fe` as they are.
 
 ## When to use plain Fe
 
@@ -52,7 +53,8 @@ targets, and tools that check those targets against each other and against state
 - **The same logic runs on chain and off chain.** A contract, a command-line tool and a web
   front end compute fees, schedules or validation rules from one source, and `femp test`
   checks that they agree instead of trusting three reimplementations.
-- **You need WebAssembly.** FeMP builds it, generates typed bindings, and runs your tests in it.
+- **You ship WebAssembly to JavaScript.** FeMP generates typed bindings, embeds the host
+  runtime and packages an npm-ready directory alongside the `.wasm` module.
 - **Correctness matters more than examples can show.** Properties and differentials search
   for the input that breaks an assumption or makes two targets disagree, and proofs settle a
   claim for every input, including what a contract's storage keeps after any sequence of

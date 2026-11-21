@@ -15,6 +15,7 @@ them:
 ```toml
 [platform.wasm]
 bindings = ["typescript"]   # [] turns generation off
+stack_size = 1048576        # optional; linear-memory stack size in bytes (default 1 MiB)
 ```
 
 ## EVM contracts
@@ -93,10 +94,12 @@ pub fn main() -> i32 uses (args: Args, out: mut Stdout, err: mut Stderr) {
 ## WebAssembly modules
 
 A `wasm` module builds into one WebAssembly module with its dependencies, plus the
-compiler's build manifest. Every non-generic `pub fn` in its root file is exported:
+compiler's build manifest. Every non-generic `#[unsafe(export)] pub fn` in the ingot is
+exported:
 
 ```fe
 // wasm/src/lib.fe
+#[unsafe(export)]
 pub fn vested_at(total: u64, start: u64, cliff: u64, duration: u64, now: u64) -> u64
 uses (host: mut Abort) {
     schedule_or_abort(total, start, cliff, duration).vested_at(now)
@@ -123,14 +126,16 @@ vesting.vestedAt(1000n, 0n, 0n, 100n, 50n); // 500n
 
 ### The host runtime
 
-`host.js` implements Fe's WebAssembly host contract, has no dependencies, and runs in browsers
-and in Node.js 20 or newer. `load()` takes an optional source and host options:
+`host.js` implements Fe's WebAssembly host contract (version 3), has no dependencies, and runs
+in browsers and in Node.js 20 or newer. `load()` takes an optional source and host options:
 
 ```js
 const app = await MyAppWeb.load(fetch("/my_app_web.wasm"), {
-  now: () => Date.now(),                  // the Clock the module reads
-  onLog: (value) => console.debug(value), // values the module logs
-  files: { "rates.txt": "250\n" },        // read-only files the module may open
+  now: () => Date.now(),                            // the Clock the module reads
+  onLog: (value) => console.debug(value),           // values the module logs
+  files: { "rates.txt": "250\n" },                  // read-only files the module may open
+  stdin: "input\n",                                 // bytes the module reads from Stdin
+  onWrite: ({ stream, bytes }) => { /* ... */ },    // stdout / stderr writes
 });
 ```
 
@@ -138,8 +143,9 @@ const app = await MyAppWeb.load(fetch("/my_app_web.wasm"), {
 | --- | --- |
 | Source | A URL (the default is the `.wasm` beside the class), a `Response`, bytes, or a promise of one. |
 | Verification | Before instantiating, the host checks the module against its manifest: versions, SHA-256, imports and exports. In a browser this needs Web Crypto, so serve the page over HTTPS or from `localhost`. |
+| Streams | `stdin` (and `guest.host.setStdin(...)`) feeds `std::io::Stdin`; writes to `Stdout` and `Stderr` are buffered on `guest.host.stdout` / `guest.host.stderr` (cleared with `guest.host.clearStreams()`) and optionally streamed via `onWrite`. |
 | Imports | `imports` adds implementations of the module's own imported functions. |
-| Errors | `GuestAbort` when the module aborts through `std::wasm::Abort`, carrying its code; `ContractError` when the module or the caller breaks the host contract. |
+| Errors | `GuestAbort` when the module aborts through `std::wasm::Abort`, carrying its code; `GuestRevert` when Fe code reverts or panics (with raw revert `data` and decoded `reason` via `revertReason`); `ContractError` when the module or the caller breaks the host contract. After a failed call (`GuestAbort`, `GuestRevert` or a trap), the host automatically replaces the WebAssembly instance so subsequent calls start from clean memory and stack. |
 
 Aborting with a code is the way to report a domain error to JavaScript:
 
@@ -178,7 +184,7 @@ of every file's kind and SHA-256:
 ```json
 {
   "project": { "name": "my-app", "version": "0.1.0" },
-  "compiler": "fe 26.6.0",
+  "compiler": "fe 26.7.0",
   "packages": [
     {
       "platform": "evm",

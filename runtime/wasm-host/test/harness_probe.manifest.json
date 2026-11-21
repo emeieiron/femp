@@ -2,149 +2,66 @@
   "manifest_version": 1,
   "module": {
     "file": "harness_probe.wasm",
-    "sha256": "3e387bce223c57b2a4c199947c52b9e1fd4af63e77dfd817941ded1b16897a49",
-    "size": 6332,
+    "sha256": "f30ffdd0881ae7bf0829707f521f592ccc7856ea80a6d3871095cb795a7394b0",
+    "size": 24094,
     "initial_memory_pages": 18
   },
-  "contract_version": 1,
+  "contract_version": 3,
   "optimization": "1",
-  "compiler": "fe 26.6.0 (5b3f96a)",
+  "compiler": "fe 26.7.0 (e6e6342)",
   "imports": [
     {
       "module": "env",
-      "name": "sys_wasm_files_close",
-      "kind": "function",
-      "type": {
-        "params": ["i32"],
-        "results": []
-      }
-    },
-    {
-      "module": "env",
-      "name": "sys_wasm_files_open",
+      "name": "__fe_revert",
       "kind": "function",
       "type": {
         "params": ["i32", "i32"],
-        "results": ["i64"]
-      }
-    },
-    {
-      "module": "env",
-      "name": "sys_wasm_files_read_byte",
-      "kind": "function",
-      "type": {
-        "params": ["i32", "i32"],
-        "results": ["i64"]
-      }
-    },
-    {
-      "module": "env",
-      "name": "sys_wasm_log_i32",
-      "kind": "function",
-      "type": {
-        "params": ["i32"],
         "results": []
       }
     },
     {
       "module": "env",
-      "name": "sys_wasm_log_u64",
+      "name": "sys_wasm_stream_read",
       "kind": "function",
       "type": {
-        "params": ["i64"],
-        "results": []
+        "params": ["i32", "i32", "i32"],
+        "results": ["i32"]
+      }
+    },
+    {
+      "module": "env",
+      "name": "sys_wasm_stream_write",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32", "i32"],
+        "results": ["i32"]
       }
     }
   ],
   "exports": [
     {
-      "name": "alloc",
-      "kind": "function",
-      "role": "allocator",
-      "params": [
-        {
-          "name": "size",
-          "type": "u32",
-          "wasm": ["i32"]
-        }
-      ],
-      "result": {
-        "type": "u32",
-        "wasm": ["i32"]
-      }
-    },
-    {
-      "name": "arena_mark",
-      "kind": "function",
-      "role": "allocator",
-      "params": [],
-      "result": {
-        "type": "u32",
-        "wasm": ["i32"]
-      }
-    },
-    {
-      "name": "arena_release",
-      "kind": "function",
-      "role": "allocator",
-      "params": [
-        {
-          "name": "mark",
-          "type": "u32",
-          "wasm": ["i32"]
-        }
-      ],
-      "result": null
-    },
-    {
       "name": "femp_entry_0",
       "kind": "function",
-      "params": [
-        {
-          "name": "femp_arg0",
-          "type": "u64",
-          "wasm": ["i64"]
-        },
-        {
-          "name": "femp_arg1",
-          "type": "bool",
-          "wasm": ["i32"]
-        }
-      ],
-      "result": {
-        "type": "bool",
-        "wasm": ["i32"]
-      }
+      "params": [],
+      "result": null
     },
     {
       "name": "femp_entry_1",
       "kind": "function",
-      "params": [
-        {
-          "name": "femp_arg0",
-          "type": "i8",
-          "wasm": ["i32"]
-        }
-      ],
-      "result": {
-        "type": "i8",
-        "wasm": ["i32"]
-      }
+      "params": [],
+      "result": null
     },
     {
       "name": "femp_entry_2",
       "kind": "function",
-      "params": [
-        {
-          "name": "script",
-          "type": "HostText",
-          "wasm": ["i32", "i32"]
-        }
-      ],
-      "result": {
-        "type": "u32",
-        "wasm": ["i32"]
-      }
+      "params": [],
+      "result": null
+    },
+    {
+      "name": "femp_entry_3",
+      "kind": "function",
+      "params": [],
+      "result": null
     },
     {
       "name": "memory",

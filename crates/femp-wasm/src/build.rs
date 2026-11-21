@@ -3,7 +3,7 @@ use std::path::Path;
 use femp_compiler::Target;
 use femp_core::Result;
 use femp_core::artifact::{Artifact, ArtifactKind, reset_dir, write_file};
-use femp_core::platform::Context;
+use femp_core::platform::{Context, PlatformId};
 use femp_core::project::Module;
 
 pub const MODULE: ArtifactKind = ArtifactKind("wasm-module");
@@ -13,8 +13,11 @@ pub const MANIFEST: ArtifactKind = ArtifactKind("wasm-manifest");
 /// `<ingot>.manifest.json`.
 pub fn build(cx: &Context<'_>, module: &Module, out_dir: &Path) -> Result<Vec<Artifact>> {
     reset_dir(out_dir)?;
+    let stack_size = cx
+        .wasm_stack_size
+        .or_else(|| cx.project.stack_size(&PlatformId::new(crate::ID)));
     let session = femp_compiler::load(module, Target::Wasm)?;
-    let built = session.build_wasm(cx.optimize)?;
+    let built = session.build_wasm(cx.optimize, stack_size)?;
     let wasm = out_dir.join(&built.file_name);
     write_file(&wasm, &built.wasm)?;
     let stem = built

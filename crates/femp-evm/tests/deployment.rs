@@ -55,6 +55,7 @@ fn replays_a_sequence_of_messages() {
         project: &project,
         environment: &environment,
         optimize: OptLevel::default(),
+        wasm_stack_size: None,
     };
     let deposit = 0x1376_5838;
     // The storage, as the prover's state, from the contract's layout.

@@ -151,7 +151,7 @@ mod tests {
                 target: "evm".into(),
                 outcome: "returned 1".into(),
             }],
-            recorded: Recorded::now("26.6.0", vec!["1".into()]),
+            recorded: Recorded::now("26.7.0", vec!["1".into()]),
         }
     }
 

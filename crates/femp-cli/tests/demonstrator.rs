@@ -378,3 +378,49 @@ output = "src/generated.fe"
     );
     assert!(fs::read_to_string(output).unwrap().contains("42"));
 }
+
+#[test]
+fn wasm_stack_size_can_be_configured_via_manifest_and_cli() {
+    let Some(project) = project() else { return };
+    let root = project.path();
+    let read_pages = || -> u64 {
+        let text = fs::read_to_string(root.join("build/wasm/web/vesting_web.manifest.json"))
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        json["module"]["initial_memory_pages"].as_u64().unwrap()
+    };
+
+    let default_build = femp(root, &["build", "-t", "wasm"]);
+    assert!(default_build.status.success(), "{}", stdout(&default_build));
+    let default_pages = read_pages();
+
+    let manifest = root.join("femp.toml");
+    let mut config = fs::read_to_string(&manifest).unwrap();
+    config.push_str("\n[platform.wasm]\nstack_size = 2097152\n");
+    fs::write(&manifest, config).unwrap();
+
+    let manifest_build = femp(root, &["build", "-t", "wasm"]);
+    assert!(
+        manifest_build.status.success(),
+        "{}",
+        stdout(&manifest_build)
+    );
+    let manifest_pages = read_pages();
+    assert!(
+        manifest_pages > default_pages,
+        "2 MiB stack_size ({manifest_pages} pages) should exceed default ({default_pages} pages)"
+    );
+
+    let cli_build = femp(root, &["build", "-t", "wasm", "--wasm-stack-size", "4194304"]);
+    assert!(cli_build.status.success(), "{}", stdout(&cli_build));
+    let cli_pages = read_pages();
+    assert!(
+        cli_pages > manifest_pages,
+        "CLI 4 MiB override ({cli_pages} pages) should exceed manifest 2 MiB ({manifest_pages} pages)"
+    );
+
+    let rejected = femp(root, &["build", "-t", "evm", "--wasm-stack-size", "131072"]);
+    let errors = String::from_utf8_lossy(&rejected.stderr);
+    assert!(!rejected.status.success());
+    assert!(errors.contains("--wasm-stack-size"), "{errors}");
+}

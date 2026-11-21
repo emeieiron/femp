@@ -10,7 +10,9 @@
     "params": 1
   },
   {
-    "kind": "unsupported"
+    "kind": "property",
+    "export": "femp_entry_2",
+    "params": 1
   },
   {
     "kind": "machine",

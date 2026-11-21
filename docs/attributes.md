@@ -25,7 +25,6 @@ declaration is reported with its file and line before anything runs.
 | Shape | Not generic, not under `#[cfg]`, and no `self` outside machine methods. |
 | Effects | None in a shared module. In an `evm` module, a machine may use `Create`, `Call`, `Ctx` and `Log`. |
 | Types | Parameters and results are `bool`, `u8`…`u256` or `i8`…`i256`. `usize` and `isize` are rejected, because their width differs per platform. |
-| Wide types | Values wider than 64 bits cannot cross a WebAssembly export, so such entry points run on the EVM and natively and show as not run on `wasm`. |
 | Location | Any file of a module. In a shared module it runs on every platform; in a platform module, on that platform. |
 
 ## `#[property]`

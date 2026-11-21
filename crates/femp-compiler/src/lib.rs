@@ -40,6 +40,6 @@ pub use wasm::WasmModule;
 
 /// The Fe release whose compiler crates this crate links. A project pinned
 /// to another release cannot be compiled by this build of femp.
-pub const LINKED_FE_VERSION: &str = "26.6.0";
+pub const LINKED_FE_VERSION: &str = "26.7.0";
 /// The commit of that release, as the compiler records it in its outputs.
-pub const LINKED_FE_COMMIT: &str = "5b3f96a";
+pub const LINKED_FE_COMMIT: &str = "e6e6342";

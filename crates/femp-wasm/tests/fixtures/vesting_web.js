@@ -6,14 +6,23 @@ export const manifest = {
   "manifest_version": 1,
   "module": {
     "file": "vesting_web.wasm",
-    "sha256": "b22b5e8a2b8f7ea2219badc4fdb6e8fb9ca228ad85b16b77b52fd97f43ecfd77",
-    "size": 6584,
+    "sha256": "ac66fa21612d5bb942b8aac79dd548f105d064289809a49438ce4e6796a0e34e",
+    "size": 6408,
     "initial_memory_pages": 17
   },
-  "contract_version": 1,
+  "contract_version": 3,
   "optimization": "1",
-  "compiler": "fe 26.6.0 (5b3f96a)",
+  "compiler": "fe 26.7.0 (e6e6342)",
   "imports": [
+    {
+      "module": "env",
+      "name": "__fe_revert",
+      "kind": "function",
+      "type": {
+        "params": ["i32", "i32"],
+        "results": []
+      }
+    },
     {
       "module": "env",
       "name": "sys_wasm_abort",

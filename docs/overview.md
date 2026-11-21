@@ -27,7 +27,7 @@ surfaces as a failing check rather than a production incident.
 ## How it relates to Fe
 
 FeMP builds on the official Fe compiler rather than replacing it. It links the compiler's own
-crates, version 26.6.0, so `femp` checks, builds and tests with exactly what `fe` uses, and
+crates, version 26.7.0, so `femp` checks, builds and tests with exactly what `fe` uses, and
 its builds are byte-identical to `fe build`'s. It does not change the language: shared code is
 ordinary Fe, platform differences are traits, effects and `#[cfg(target = ...)]`, and the
 attributes FeMP reads are ones the compiler accepts and ignores.

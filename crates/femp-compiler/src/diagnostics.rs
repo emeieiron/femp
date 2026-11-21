@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 use common::InputDb;
 use common::diagnostics::{CompleteDiagnostic, Severity};
 use common::file::IngotFileKind;
+use common::stdlib::is_embedded_builtin;
 use driver::DriverDataBase;
 use driver::db::DiagnosticsCollection;
 use hir::Ingot;
@@ -221,10 +222,4 @@ fn dependency_name(db: &DriverDataBase, url: &Url) -> String {
         Some(version) => format!("Dependency: {name} (version: {version})"),
         None => format!("Dependency: {name}"),
     }
-}
-
-/// The compiler's own copies of core and std. Source replacements of them
-/// use ordinary URLs and are checked like other dependencies.
-fn is_embedded_builtin(url: &Url) -> bool {
-    matches!(url.scheme(), "builtin-core" | "builtin-std")
 }

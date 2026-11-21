@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-import { ContractError, GuestAbort, instantiate } from "./host.js";
+import {
+  CONTRACT_VERSION,
+  ContractError,
+  GuestAbort,
+  GuestRevert,
+  instantiate,
+} from "./host.js";
 
 const moduleUrl = new URL("./test/probe.wasm", import.meta.url);
 const manifest = JSON.parse(
@@ -12,6 +18,11 @@ const manifest = JSON.parse(
 function load(options = {}) {
   return instantiate(moduleUrl, { manifest, ...options });
 }
+
+test("manifest uses host contract version 3", () => {
+  assert.equal(CONTRACT_VERSION, 3);
+  assert.equal(manifest.contract_version, 3);
+});
 
 test("64-bit integers cross as bigint", async () => {
   const guest = await load();
@@ -56,19 +67,67 @@ test("the clock and the log are supplied by the host", async () => {
   assert.deepEqual(logged, [99n]);
 });
 
-test("abort surfaces as an exception carrying the code", async () => {
+test("abort surfaces as an exception carrying the code and restarts the instance", async () => {
   const guest = await load();
+  const initial = guest.instance;
   assert.throws(
     () => guest.call("stop", 6),
     (error) => error instanceof GuestAbort && error.code === 6,
   );
+  assert.notEqual(guest.instance, initial);
+  assert.equal(guest.call("add", 1n, 2n), 3n);
 });
 
-test("files are read-only and tracked by handle", async () => {
-  const guest = await load({ files: { "notes.txt": "one\ntwo\n" } });
+test("panics and assert messages surface as GuestRevert with decoded reasons", async () => {
+  const guest = await load();
+  const initial = guest.instance;
+  assert.throws(
+    () => guest.call("add", (1n << 64n) - 1n, 1n),
+    (error) =>
+      error instanceof GuestRevert &&
+      error.data !== null &&
+      error.reason === "arithmetic overflow",
+  );
+  assert.notEqual(guest.instance, initial);
+
+  assert.throws(
+    () => guest.call("check_positive", -5),
+    (error) =>
+      error instanceof GuestRevert &&
+      error.data !== null &&
+      error.reason === "must be positive",
+  );
+  assert.equal(guest.call("check_positive", 7), 7);
+});
+
+test("standard input and output streams cross the host contract", async () => {
+  const writes = [];
+  const guest = await load({
+    stdin: "hello wasm\n",
+    onWrite: (entry) => writes.push(entry),
+  });
+  assert.equal(guest.call("echo_line"), 10);
+  assert.equal(guest.host.stdout, "hello wasm\n");
+  assert.equal(guest.host.stderr, "");
+  assert.equal(writes.length > 0, true);
+
+  guest.host.clearStreams();
+  guest.host.setStdin("second\n");
+  assert.equal(guest.call("echo_line"), 6);
+  assert.equal(guest.host.stdout, "second\n");
+});
+
+test("files are read-only, support bulk reads, and are tracked by handle", async () => {
+  const guest = await load({
+    files: {
+      "notes.txt": "one\ntwo\n",
+      "nums.bin": new Uint8Array([10, 20, 30, 40]),
+    },
+  });
   assert.deepEqual(guest.call("file_size", "notes.txt"), { ok: true, value: 8 });
   assert.deepEqual(guest.call("file_size", "missing.txt"), { ok: false, code: 1 });
   assert.deepEqual(guest.call("file_size", ""), { ok: false, code: 3 });
+  assert.deepEqual(guest.call("file_sum", "nums.bin"), { ok: true, value: 100 });
   assert.equal(guest.host.openHandles, 0);
 
   guest.call("open_and_keep", "notes.txt");

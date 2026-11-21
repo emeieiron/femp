@@ -41,6 +41,10 @@ impl Platform for StubPlatform {
         &["typescript"]
     }
 
+    fn supports_stack_size(&self) -> bool {
+        self.id.as_str() == "wasm"
+    }
+
     fn check(&self, _: &Context<'_>, _: &Module) -> Result<()> {
         Ok(())
     }

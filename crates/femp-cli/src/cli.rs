@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, value_parser};
 use femp_core::environment::OptLevel;
 
 #[derive(Parser)]
@@ -57,6 +57,10 @@ pub struct BuildArgs {
     /// Optimization level: 0, 1, 2 or s
     #[arg(short = 'O', long, value_name = "LEVEL", default_value = "1", value_parser = parse_opt_level)]
     pub optimize: OptLevel,
+
+    /// Stack size in bytes for WebAssembly modules (default 1 MiB, rounded up to a 64 KiB page)
+    #[arg(long, value_name = "BYTES", value_parser = value_parser!(u32).range(1..))]
+    pub wasm_stack_size: Option<u32>,
 }
 
 #[derive(Args)]

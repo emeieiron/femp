@@ -1,3 +1,4 @@
+#[unsafe(export)]
 pub fn answer() -> u64 {
     planted_core::doubled(x: 21)
 }

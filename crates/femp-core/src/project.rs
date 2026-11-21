@@ -230,6 +230,13 @@ impl Project {
             .and_then(|section| section.bindings.as_deref())
     }
 
+    pub fn stack_size(&self, platform: &PlatformId) -> Option<u32> {
+        self.manifest
+            .platforms
+            .get(platform.as_str())
+            .and_then(|section| section.stack_size)
+    }
+
     pub fn build_dir(&self, platform: &PlatformId, module: &Module) -> PathBuf {
         self.root
             .join(BUILD_DIR)

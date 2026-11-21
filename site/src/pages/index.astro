@@ -101,15 +101,15 @@ type Cell = 'yes' | 'partial' | 'no';
 const compare: { what: string; fe: [Cell, string]; femp: [Cell, string] }[] = [
   { what: 'EVM contracts', fe: ['yes', 'Bytecode, ABI, metadata'], femp: ['yes', 'The same bytes, plus TypeScript bindings'] },
   { what: 'Native programs', fe: ['yes', 'Executables, objects, static libraries'], femp: ['partial', 'Executables'] },
-  { what: 'WebAssembly', fe: ['no', 'Not in the release build'], femp: ['yes', 'Modules, JS/TS bindings, host runtime'] },
+  { what: 'WebAssembly', fe: ['partial', 'Modules and build manifest'], femp: ['yes', 'The same bytes, plus JS/TS bindings, host runtime'] },
   { what: 'Several targets in one project', fe: ['no', 'Workspace members share one target'], femp: ['yes', 'Shared code, checked for every platform'] },
-  { what: 'Unit tests', fe: ['partial', 'EVM or native, per ingot'], femp: ['yes', 'Every platform side by side; divergence fails'] },
+  { what: 'Unit tests', fe: ['partial', 'EVM, native or WebAssembly, per ingot'], femp: ['yes', 'Every platform side by side; divergence fails'] },
   { what: 'Generated inputs, differentials', fe: ['no', '—'], femp: ['yes', 'femp prop, with shrinking and regressions'] },
   { what: 'Proofs for all inputs', fe: ['no', '—'], femp: ['yes', 'femp prove, with Z3'] },
   { what: 'Source generators', fe: ['no', '—'], femp: ['yes', 'FSGP, run before every command'] },
   { what: 'Formatter, language server, docs', fe: ['yes', 'fe fmt, fe lsp, fe doc'], femp: ['no', 'Use fe’s alongside'] },
   { what: 'Gas benchmarks, EVM traces', fe: ['yes', 'fe bench, fe test traces'], femp: ['no', '—'] },
-  { what: 'Compiler release', fe: ['yes', 'Any you install'], femp: ['partial', 'The one femp links: 26.6.0'] },
+  { what: 'Compiler release', fe: ['yes', 'Any you install'], femp: ['partial', 'The one femp links: 26.7.0'] },
 ];
 const mark: Record<Cell, string> = { yes: '●', partial: '◐', no: '○' };
 ---
@@ -139,12 +139,12 @@ const mark: Record<Cell, string> = { yes: '●', partial: '◐', no: '○' };
         </div>
       </div>
       <div class="hero-install rise" style="--i: 4">
-        <p class="install-label">Install: femp, the Fe 26.6.0 compiler, Z3 and Node.js</p>
+        <p class="install-label">Install: femp, the Fe 26.7.0 compiler, Z3 and Node.js</p>
         <CopyCommand command={install} label="Copy the install command" />
         <dl class="specs">
           <div><dt>Targets</dt><dd>EVM · native · WebAssembly</dd></div>
           <div><dt>Checks</dt><dd>Tests · properties · differentials · proofs</dd></div>
-          <div><dt>Compiler</dt><dd>Fe 26.6.0, linked in; byte-identical builds</dd></div>
+          <div><dt>Compiler</dt><dd>Fe 26.7.0, linked in; byte-identical builds</dd></div>
         </dl>
       </div>
     </div>

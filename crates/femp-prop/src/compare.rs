@@ -10,7 +10,7 @@ pub trait Comparator: Send + Sync {
 }
 
 /// Values must be equal; panics agree unless both report a reason and the
-/// reasons differ, because WebAssembly traps carry no reason.
+/// reasons differ (a bare WebAssembly `unreachable` trap carries no reason).
 pub struct Normalized;
 
 /// Outcomes must be identical.

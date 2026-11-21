@@ -74,7 +74,8 @@ pub contract Fees {
 
 ```fe
 // wasm/src/lib.fe
-/// Every public function in this file is exported to JavaScript.
+/// Exported to JavaScript.
+#[unsafe(export)]
 pub fn fee(amount: u64, rate: u64) -> u64 {
     my_app_core::fee(amount, rate)
 }
@@ -112,8 +113,7 @@ femp prop
 ```
 
 ```text
-PASS  core::fee_spec  256 cases on evm, native
-      not run on wasm: a WebAssembly module traps alike when a spec rejects a case and when it fails
+PASS  core::fee_spec  256 cases on evm, native, wasm
 
 1 passed, 0 failed (seed 0x000000000000002a, normalized comparison)
 ```

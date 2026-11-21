@@ -80,13 +80,13 @@ bb1:
   v5: u64 = call f6(v4)  @src/lib.fe:21
   return v5  @src/lib.fe:20
 
-f3 std::timestamp(v0: Evm) -> Timestamp  @std:src/evm/effects.fe:909
+f3 std::timestamp(v0: Evm) -> Timestamp  @std:src/evm/effects.fe:1009
 bb0:
   goto bb1()
 bb1:
-  v1: u256 = v0.0  @std:src/evm/effects.fe:910
-  v2: Timestamp = call f4(v1)  @std:src/evm/effects.fe:910
-  return v2  @std:src/evm/effects.fe:909
+  v1: u256 = v0.0  @std:src/evm/effects.fe:1010
+  v2: Timestamp = call f4(v1)  @std:src/evm/effects.fe:1010
+  return v2  @std:src/evm/effects.fe:1009
 
 f4 std::evm::units::Timestamp::from_seconds(v0: u256) -> Timestamp  @std:src/evm/units.fe:271
 bb0:

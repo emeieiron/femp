@@ -1,16 +1,39 @@
 // Host runtime for WebAssembly modules compiled from Fe. It supplies the
-// imports of the Fe host contract, checks a module against its build
-// manifest, and converts values at the module boundary. It has no
-// dependencies and runs in browsers and in Node.js 20 or newer.
+// imports of the Fe host contract (version 3), checks a module against its
+// build manifest, converts values at the module boundary, and restarts the
+// module instance after a failed call. It has no dependencies and runs in
+// browsers and in Node.js 20 or newer.
 
 export const MANIFEST_VERSION = 1;
-export const CONTRACT_VERSION = 1;
+export const CONTRACT_VERSION = 3;
 
 const IMPORT_MODULE = "env";
 const MAX_TEXT_BYTES = 65536;
 const FILE_NOT_FOUND = 1;
 const FILE_OUT_OF_RANGE = 2;
 const FILE_BAD_NAME = 3;
+
+const OUTPUT_STREAMS = Object.freeze({
+  1: "stdout",
+  2: "stderr",
+});
+
+/** What the codes of Solidity `Panic(uint256)` revert data mean. */
+export const PANIC_CODES = Object.freeze({
+  0x00: "generic panic",
+  0x01: "assertion failed",
+  0x11: "arithmetic overflow",
+  0x12: "division by zero",
+  0x21: "invalid enum value",
+  0x22: "invalid storage encoding",
+  0x31: "pop from an empty array",
+  0x32: "index out of bounds",
+  0x41: "out of memory",
+  0x51: "call to a zero-initialized function",
+});
+
+const PANIC_SELECTOR = 0x4e487b71;
+const ERROR_SELECTOR = 0x08c379a0;
 
 export class ContractError extends Error {
   constructor(message) {
@@ -27,6 +50,62 @@ export class GuestAbort extends Error {
   }
 }
 
+/**
+ * Decodes Solidity `Panic(uint256)` or `Error(string)` revert data, returning
+ * its human-readable reason or `null` for any other payload.
+ */
+export function revertReason(data) {
+  if (data.length < 4) {
+    return null;
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const word = (index) => {
+    const at = 4 + 32 * index;
+    if (data.length < at + 32 || data.subarray(at, at + 24).some((byte) => byte !== 0)) {
+      return null;
+    }
+    return view.getBigUint64(at + 24);
+  };
+  const selector = view.getUint32(0);
+  if (selector === PANIC_SELECTOR && data.length === 36) {
+    const code = word(0);
+    return code === null ? null : (PANIC_CODES[Number(code)] ?? null);
+  }
+  if (selector === ERROR_SELECTOR && word(0) === 32n) {
+    const length = word(1);
+    if (length === null || length > BigInt(data.length - 68)) {
+      return null;
+    }
+    return new TextDecoder().decode(data.subarray(68, 68 + Number(length)));
+  }
+  return null;
+}
+
+/**
+ * The module panicked with a code or reverted with data. `data` holds the raw
+ * revert bytes, or `null` when the module ran out of memory trying to allocate
+ * them; `reason` is the decoded reason (`revertReason`).
+ */
+export class GuestRevert extends Error {
+  constructor(data) {
+    const reason = data === null ? "out of memory" : revertReason(data);
+    const hex =
+      data === null
+        ? ""
+        : Array.from(data, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    super(
+      data === null
+        ? "the module panicked and had no memory left for the revert data"
+        : reason === null
+          ? `the module reverted with data 0x${hex}`
+          : `the module reverted: ${reason}`,
+    );
+    this.name = "GuestRevert";
+    this.data = data;
+    this.reason = reason;
+  }
+}
+
 export async function instantiate(source, options = {}) {
   const bytes = await loadBytes(source);
   const host = new Host(options);
@@ -40,18 +119,44 @@ export async function instantiate(source, options = {}) {
 
   const instance = await WebAssembly.instantiate(module, imports);
   host.memory = instance.exports.memory;
-  return new Guest(instance, options.manifest, host);
+  return new Guest(module, instance, imports, options.manifest, host);
 }
 
 export class Guest {
-  constructor(instance, manifest, host) {
+  #depth = 0;
+  #failed = false;
+
+  constructor(module, instance, imports, manifest, host) {
+    this.module = module;
     this.instance = instance;
+    this.imports = imports;
     this.host = host;
     this.signatures = new Map(
       (manifest?.exports ?? [])
         .filter((entry) => entry.kind === "function" && !entry.role)
         .map((entry) => [entry.name, entry]),
     );
+  }
+
+  #restart() {
+    this.instance = new WebAssembly.Instance(this.module, this.imports);
+    this.host.memory = this.instance.exports.memory;
+  }
+
+  #restartingOnFailure(run) {
+    this.#depth += 1;
+    try {
+      return run();
+    } catch (error) {
+      this.#failed = true;
+      throw error;
+    } finally {
+      this.#depth -= 1;
+      if (this.#depth === 0 && this.#failed) {
+        this.#failed = false;
+        this.#restart();
+      }
+    }
   }
 
   // With a manifest, arguments and the result are converted according to
@@ -63,7 +168,7 @@ export class Guest {
     }
     const signature = this.signatures.get(name);
     if (!signature) {
-      return target(...args);
+      return this.#restartingOnFailure(() => target(...args));
     }
     if (args.length !== signature.params.length) {
       throw new ContractError(
@@ -71,15 +176,15 @@ export class Guest {
       );
     }
 
-    const arena = new Arena(this.instance.exports);
-    try {
+    return this.#restartingOnFailure(() => {
+      const arena = new Arena(this.instance.exports);
       const lowered = signature.params.flatMap((param, index) =>
         lowerArgument(name, param, args[index], arena),
       );
-      return liftResult(signature.result, target(...lowered));
-    } finally {
+      const result = liftResult(signature.result, target(...lowered));
       arena.release();
-    }
+      return result;
+    });
   }
 }
 
@@ -115,9 +220,14 @@ class Host {
   constructor(options) {
     this.now = options.now ?? (() => Date.now());
     this.onLog = options.onLog ?? ((value) => console.log(value));
+    this.onWrite = options.onWrite ?? null;
     this.files = new Map(
       Object.entries(options.files ?? {}).map(([name, contents]) => [name, toBytes(contents)]),
     );
+    this.input = toBytes(options.stdin ?? "");
+    this.consumed = 0;
+    this.decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+    this.written = { stdout: "", stderr: "" };
     this.handles = new Map();
     this.nextHandle = 1;
     this.memory = undefined;
@@ -127,9 +237,29 @@ class Host {
     return this.handles.size;
   }
 
+  get stdout() {
+    return this.written.stdout;
+  }
+
+  get stderr() {
+    return this.written.stderr;
+  }
+
   // Adds or replaces a file the module may open from now on.
   setFile(name, contents) {
     this.files.set(name, toBytes(contents));
+  }
+
+  // Replaces the standard input buffer and rewinds the read cursor.
+  setStdin(contents) {
+    this.input = toBytes(contents);
+    this.consumed = 0;
+  }
+
+  // Clears captured standard output and standard error text.
+  clearStreams() {
+    this.decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+    this.written = { stdout: "", stderr: "" };
   }
 
   imports() {
@@ -143,13 +273,39 @@ class Host {
         },
         sys_wasm_files_open: (address, length) => this.openFile(address, length),
         sys_wasm_files_size: (handle) => replyOk(this.file(handle).length),
+        sys_wasm_files_read: (handle, offset, address, length) =>
+          this.readFile(handle, offset, address, length),
         sys_wasm_files_read_byte: (handle, index) => this.readByte(handle, index),
         sys_wasm_files_close: (handle) => {
           this.file(handle);
           this.handles.delete(handle >>> 0);
         },
+        sys_wasm_stream_write: (stream, address, length) =>
+          this.writeStream(stream, address, length),
+        sys_wasm_stream_read: (stream, address, length) =>
+          this.readStream(stream, address, length),
+        __fe_revert: (address, length) => {
+          const view = this.memoryHolding(address, length, "revert");
+          const addr = address >>> 0;
+          throw new GuestRevert(view.slice(addr, addr + (length >>> 0)));
+        },
+        abort: () => {
+          throw new GuestRevert(null);
+        },
       },
     };
+  }
+
+  memoryHolding(address, length, what) {
+    const addr = address >>> 0;
+    const len = length >>> 0;
+    const view = new Uint8Array(this.memory.buffer);
+    if (addr + len > view.length) {
+      throw new ContractError(
+        `${what}: range at ${addr} of length ${len} lies outside the module's memory`,
+      );
+    }
+    return view;
   }
 
   openFile(address, length) {
@@ -166,10 +322,48 @@ class Host {
     return replyOk(handle);
   }
 
+  readFile(handle, offset, address, length) {
+    const contents = this.file(handle);
+    const view = this.memoryHolding(address, length, "read");
+    const start = Math.min(offset >>> 0, contents.length);
+    const count = Math.min(length >>> 0, contents.length - start);
+    view.set(contents.subarray(start, start + count), address >>> 0);
+    return replyOk(count);
+  }
+
   readByte(handle, index) {
     const contents = this.file(handle);
     const position = index >>> 0;
     return position < contents.length ? replyOk(contents[position]) : replyError(FILE_OUT_OF_RANGE);
+  }
+
+  writeStream(stream, address, length) {
+    const name = OUTPUT_STREAMS[stream >>> 0];
+    if (name === undefined) {
+      throw new ContractError(
+        `write: stream ${stream >>> 0} is not standard output (1) or standard error (2)`,
+      );
+    }
+    const view = this.memoryHolding(address, length, "write");
+    const addr = address >>> 0;
+    const count = Math.min(length >>> 0, MAX_TEXT_BYTES);
+    const bytes = view.slice(addr, addr + count);
+    this.written[name] += this.decoders[name].decode(bytes, { stream: true });
+    if (this.onWrite !== null) {
+      this.onWrite({ stream: name, bytes });
+    }
+    return count;
+  }
+
+  readStream(stream, address, length) {
+    if (stream >>> 0 !== 0) {
+      throw new ContractError(`read: stream ${stream >>> 0} is not standard input (0)`);
+    }
+    const view = this.memoryHolding(address, length, "read");
+    const count = Math.min(length >>> 0, MAX_TEXT_BYTES, this.input.length - this.consumed);
+    view.set(this.input.subarray(this.consumed, this.consumed + count), address >>> 0);
+    this.consumed += count;
+    return count;
   }
 
   file(handle) {
@@ -182,7 +376,9 @@ class Host {
 
   readText(address, length) {
     if (length > MAX_TEXT_BYTES) {
-      throw new ContractError(`the module passed ${length} bytes of text; the limit is ${MAX_TEXT_BYTES}`);
+      throw new ContractError(
+        `the module passed ${length} bytes of text; the limit is ${MAX_TEXT_BYTES}`,
+      );
     }
     if (address + length > this.memory.buffer.byteLength) {
       throw new ContractError("the module passed text that lies outside its memory");
