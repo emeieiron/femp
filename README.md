@@ -32,6 +32,13 @@ dialect.
 [Documentation](https://emeieiron.github.io/femp/) · [Quick start](docs/quick-start.md) ·
 [FeMP and Fe](docs/fe-and-femp.md) · [Example project](examples/vesting)
 
+## Demo
+
+[![FeMP demo: one Fe codebase built, tested, and proved on EVM, native, and WebAssembly](https://img.youtube.com/vi/7vcoRUE7RIs/maxresdefault.jpg)](https://youtu.be/7vcoRUE7RIs)
+
+▶ [Watch on YouTube](https://youtu.be/7vcoRUE7RIs) (4:35): a rate-limited treasury goes from
+`femp doctor` to `femp prove`, then FeMP catches two planted bugs.
+
 ## Fe highlight
 
 What makes FeMP possible at the language level is **Fe's capability-typed effect system
