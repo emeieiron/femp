@@ -140,6 +140,9 @@ output under `dist/` with SHA-256 hashes.
   build on x86-64 Linux, AArch64 Linux and Apple silicon.
 - Code the prover cannot model yet, such as strings, recursion and machines that deploy
   contracts, is reported as not supported. See [limits](docs/proving.md#limits).
+- The Z3 that ships for Linux needs glibc 2.39 on x86-64 and 2.38 on ARM64, as on Ubuntu 24.04.
+  On older systems such as Debian 12, install `z3` from the package manager for `femp prove`.
+  See [installation](docs/installation.md).
 
 ## Develop
 

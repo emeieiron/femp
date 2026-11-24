@@ -11,7 +11,7 @@ startup files, and sets up everything `femp` runs:
 | Component | Used for |
 | --- | --- |
 | `femp`, with the Fe 26.7.0 compiler and its EVM, native and WebAssembly backends built in | Every command. There is no separate `fe` to install. |
-| Z3, in `~/.femp/z3` | `femp prove`. Its Linux builds need glibc 2.38 or newer; on older systems femp uses a `z3` from the system's package manager. |
+| Z3, in `~/.femp/z3` | `femp prove`. Its Linux builds need glibc 2.39 or newer on x86-64 and 2.38 or newer on ARM64, as on Ubuntu 24.04. On older systems, such as Debian 12, install `z3` with the system's package manager (`sudo apt-get install z3`) and femp uses that one. |
 | Node.js, in `~/.femp/node`, when no Node.js 20 or newer is on `PATH` | Running WebAssembly. It is kept for femp alone and does not change which `node` other programs see. |
 | A C compiler, when none is found | Linking native executables: `gcc` from the system's package manager on Linux, Apple's Command Line Tools on macOS. The installer asks first, because this may need your password. |
 
