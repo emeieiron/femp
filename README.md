@@ -32,6 +32,75 @@ dialect.
 [Documentation](https://emeieiron.github.io/femp/) · [Quick start](docs/quick-start.md) ·
 [FeMP and Fe](docs/fe-and-femp.md) · [Example project](examples/vesting)
 
+## Fe highlight
+
+What makes FeMP possible at the language level is **Fe's capability-typed effect system
+(`uses` / `with`), exclusive borrow discipline, and structured `contract` / `recv` semantics**:
+
+- **Explicit effect & mutability boundaries (`uses`).** Every ambient dependency—storage
+  (`store` vs. `mut store`), EVM context (`ctx: Ctx`), external calls (`call` vs. `mut call`),
+  logs, or host I/O—must appear in `uses (...)`. This keeps shared ingots provably target-agnostic
+  for cross-platform execution (`femp test`, `femp prop`) and tells `femp prove` statically which
+  handlers read vs. mutate storage and where reentrancy can occur.
+- **Scoped capability injection (`with`) and exclusive borrows.** Shared logic depends only on
+  portable trait capabilities (such as `Clock`) while each target binds its native environment at
+  the boundary via `with (...)`. Because Fe's borrow checker enforces exclusive `mut` access,
+  `femp prove` lowers shared borrows to pure values and `mut` parameters / storage writes to
+  copy-in/copy-out transitions—proving contracts in Z3 without a heap-aliasing model.
+- **Typed `msg` / `recv` state machines & ordinary-Fe attributes.** Structured `recv` arms turn
+  a contract directly into a state machine over its `store` struct, while Fe accepts FeMP's
+  attributes (`#[property]`, `#[differential]`, `#[invariant]`, `#[spec]`) natively so the same
+  Fe file compiles with `fe build`, runs across targets with `femp prop`, and verifies inductively
+  with `femp prove`.
+
+```fe
+// examples/vesting/evm/src/lib.fe
+pub contract Vesting uses (ctx: Ctx, log: mut Log) {
+    mut store: VestingStore,
+
+    recv VestingMsg {
+        Claimed -> u64 uses (store) {
+            store.claimed
+        }
+
+        Claim { amount } -> u64 uses (mut store, ctx, mut log) {
+            let current = position(
+                total: store.total,
+                start: store.start,
+                cliff: store.cliff,
+                duration: store.duration,
+                claimed: store.claimed,
+            )
+            let outcome = with (Clock = block_clock()) {
+                vesting_core::claim_now(current, amount)
+            }
+            match outcome {
+                Result::Ok(updated) => {
+                    store.claimed = updated.claimed
+                    log.emit(TokensClaimed { amount, total_claimed: updated.claimed })
+                    updated.claimed
+                },
+                Result::Err(error) => revert_error(VestingFailed { code: error.code() }),
+            }
+        }
+    }
+}
+
+/// The contract never pays out more than the schedule's total.
+#[invariant]
+fn claims_stay_within_total(store: VestingStore) -> bool {
+    store.claimed <= store.total
+}
+```
+
+## Architecture
+
+`femp-cli` acts as the composition root, wiring `femp-testing`, `femp-prop`, `femp-prove`, and the platform adapters (`femp-evm`, `femp-native`, `femp-wasm`) around shared traits in `femp-core` (`Platform`, `Executor`, `Deployer`). Only `femp-compiler` links the Fe compiler crates directly, lowering functions into `femp-vir` for `femp-prove` while platform adapters delegate compilation to `femp-compiler` and harness execution to `femp-harness` and `femp-host`.
+
+![FeMP architecture showing main modules, trait contracts, and component interactions](docs/arch.jpg)
+
+See [architecture](docs/architecture.md) for the full breakdown of crates, traits, and verification passes.
+
 ## Install
 
 ```sh
