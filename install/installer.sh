@@ -219,11 +219,11 @@ ensure_node() {
     node_status="$("$FEMP_HOME/node/bin/node" --version) ($FEMP_HOME/node)"
 }
 
-# Native executables are linked with `cc` on x86-64 Linux and Apple silicon,
+# Native executables are linked with `cc` on x86-64 and AArch64 Linux and on Apple silicon,
 # the hosts the Fe native backend supports.
 ensure_c_compiler() {
     case "$target" in
-        x86_64-unknown-linux-gnu | aarch64-apple-darwin) ;;
+        x86_64-unknown-linux-gnu | aarch64-unknown-linux-gnu | aarch64-apple-darwin) ;;
         *)
             cc_status="not needed (native executables cannot be built on $target)"
             return
