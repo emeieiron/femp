@@ -39,6 +39,52 @@ dialect.
 ▶ [Watch on YouTube](https://youtu.be/7vcoRUE7RIs) (4:35): a rate-limited treasury goes from
 `femp doctor` to `femp prove`, then FeMP catches two planted bugs.
 
+### Run
+
+#### Install FeMP
+
+```sh
+curl -fsSL https://github.com/emeieiron/femp/releases/latest/download/installer.sh | sh
+```
+
+#### Get FeMP Demo
+
+Create your own copy from the [emeieiron/femp-demo](https://github.com/emeieiron/femp-demo)
+template repository (via **Use this template** on GitHub or the CLI):
+
+```sh
+gh repo create my-femp-demo --template emeieiron/femp-demo --clone --public
+cd my-femp-demo
+```
+
+Or clone it directly:
+
+```sh
+git clone https://github.com/emeieiron/femp-demo.git
+cd femp-demo
+```
+
+#### Run the demo
+
+```sh
+femp doctor   # verify linked Fe 26.7.0, Node.js, Z3, and cc
+femp check    # generate shared/src/limits.fe and type-check all targets
+femp test     # run shared unit tests across EVM, native, and WebAssembly + EVM contract tests
+femp prop     # run properties, differentials, and TreasuryContractMachine
+femp prove    # prove specs, properties, TreasuryModel, and StorageMap contract claims with Z3
+femp build    # emit EVM bytecode/ABI/TS, native CLI, and Wasm + JS bindings under build/
+```
+
+Run the compiled WebAssembly and native targets:
+
+```sh
+node scripts/run-wasm.mjs
+./build/native/cli/treasury_cli quote 100000 250 60 20000
+```
+
+See [See FeMP catch real bugs](https://github.com/emeieiron/femp-demo#see-femp-catch-real-bugs) to
+reproduce the two planted-bug experiments from the video.
+
 ## Fe highlight
 
 What makes FeMP possible at the language level is **Fe's capability-typed effect system
@@ -228,6 +274,12 @@ cargo test --workspace
 ```
 
 [Architecture](docs/architecture.md) · [Adding a platform](docs/adding-a-platform.md)
+
+## AI usage
+
+FeMP was developed with AI assistance. Anthropic's **Claude Opus** and **Claude Fable** models
+helped write the code, tests, and documentation. Commits made with AI assistance carry a
+`Co-Authored-By` trailer.
 
 ## License
 
